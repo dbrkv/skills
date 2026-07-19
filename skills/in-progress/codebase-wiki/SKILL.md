@@ -15,7 +15,7 @@ Read a repository, then produce a set of interconnected documentation pages that
 
 ## 1. Survey the repository
 
-Before writing anything, build a mental model of the codebase. The survey has two passes: a structural scan and a deep code scan.
+Before writing anything, build a mental model of the codebase. The survey has three passes: a structural scan, a deep code scan, and a business-logic discovery pass. All three are mandatory — skipping the third is the most common cause of a wiki that documents the entities but misses the workflows, policies, and calculations readers actually need to change.
 
 ### Pass 1: Structural scan
 
@@ -49,13 +49,28 @@ The structural scan catches what's visible from directory names and config files
 - Scan for service classes, event handlers, and job/worker definitions — these reveal background systems
 - Check for domain-specific directories that don't map to obvious top-level names
 - Look for the domain model even when there's no `domain/` directory. Recurring nouns in class/struct/table names, past-tense event types, and domain-named exceptions (`InsufficientFundsError`, `OverlappingReservationError`) all reveal foundational concepts that may warrant their own `primitives/` pages. See `references/domain-model.md` for the full discovery playbook.
-- Look for business logic, not just domain objects. Multi-step workflows (orchestrators, sagas, queue processors, workflow-engine definitions), decisions and policies (pricing, eligibility, fraud, strategy/policy classes, rule engines, decision tables), pure calculations (formulas, currency conversion, scoring), and cross-aggregate rules (partial unique indexes, exclusion constraints, advisory locks) all deserve their own pages — usually under `features/` or `systems/`. See `references/business-logic.md` for category-specific discovery signals and page templates.
+- Look for business logic, not just domain objects. If you spot a multi-step orchestrator, a branchy decision, a pure calculation, or a cross-aggregate constraint during the deep scan, note it — Pass 3 runs the full discovery.
 
 The goal is to discover the **complete list of topics** the wiki should cover. The structural scan gives you the skeleton; the deep scan fills in the muscle. A feature like "Analytics" might not have its own top-level directory but lives inside `src/features/analytics/` or is revealed by a set of feature flags and API endpoints.
 
+### Pass 3: Business-logic discovery
+
+Passes 1 and 2 find subsystems and domain objects. This pass finds the *behavior* — the workflows, decisions, calculations, and cross-aggregate rules that make the business run. It is mandatory and separate from Pass 2 because business logic is the code readers most often need to change, and it is the easiest to miss: it is defined by what code does, not by where it lives, so it does not gather in any one directory and is invisible to a structural scan. A wiki that documents the entities and skips the logic leaves every reader one refactor away from an expensive mistake.
+
+**Read `references/business-logic.md` first.** It defines the four signal groups, the behavior-based discovery methods, and the page templates. Run all four groups against the codebase and emit a dedicated **business-logic topic list** — kept separate from the subsystem and domain-object lists because these pages use different templates (workflow / policy / calculation) than the subsystem template:
+
+- **Workflows and processes** — multi-step orchestrators, sagas, queue processors, workflow-engine definitions, background jobs. Signals: a method calling several collaborators in sequence, status fields with many values, retry/compensation code.
+- **Decisions and policies** — pricing, eligibility, fraud, access control, strategy/policy classes, rule engines, decision tables. Signals: methods returning a boolean or category (`isEligible`, `shouldApprove`, `classify`), branchy code, config-driven thresholds.
+- **Calculations and transformations** — fees, taxes, currency conversion, scoring, proration. Signals: pure functions with arithmetic bodies, lookup tables, verb-named methods (`compute`, `convert`, `score`).
+- **Cross-aggregate rules** — invariants spanning multiple aggregates. Signals: application services querying multiple repositories, partial unique indexes, exclusion constraints, advisory locks.
+
+Use the behavior-based discovery methods in `references/business-logic.md` ("How to find behavioral code") rather than assuming where logic lives. Trace call graphs from every entry point the repo actually has, grep for behavioral lexical patterns (dispatch/publish calls, branching density, retry/compensate keywords), sort by complexity and test density, and inspect the data layer for constraints. Directory and class names (`Service`, `Handler`, `Command`, `Policy`, `Workflow`) are a hint for where to read first, not a filter — teams diverge from framework conventions, especially in long-lived codebases, and a workflow can live in a controller, a model method, or a free function just as easily as in a dedicated service.
+
+Every business-logic topic becomes a planned page using its matching template. These pages usually live under `features/` (user-visible or cross-system) or `systems/` (internal engine or background process). Do not absorb a workflow or policy into the subsystem page of its owning directory — an orchestration method found anywhere in the codebase is a workflow page, not a bullet inside that directory's subsystem page.
+
 ### Exhaustive subsystem discovery
 
-After both passes, walk every top-level source directory (and one level below) to check for subsystems you missed. For each directory that contains its own service, module, or feature, decide:
+After all three passes, walk every top-level source directory (and one level below) to check for subsystems you missed. For each directory that contains its own service, module, or feature, decide:
 
 - **Tier 1** — core subsystems most contributors will encounter. Full dedicated page.
 - **Tier 2** — important but specialized. Shorter dedicated page.
@@ -82,13 +97,14 @@ At the end of the survey, produce a **survey context document** — a compact su
 - **Repo summary** — 3-5 sentences: what the project is, its tech stack, and high-level structure
 - **Architecture overview** — major components and how they connect
 - **Discovered topics** — the complete list of features, systems, apps, packages, and primitives found during both scan passes
+- **Business-logic topics** — the workflows, policies, calculations, and cross-aggregate rules found in Pass 3. Each entry is tagged with its category (workflow / policy / calculation / cross-aggregate) and the source files that implement it. Kept as a separate list from subsystem and domain topics so each can be planned with the matching page template.
 - **Key patterns** — coding conventions, error handling patterns, testing patterns
 - **Glossary seeds** — project-specific terms encountered during the scan
 - **Directory-to-purpose map** — which source directories map to which topics
 
 ### Coverage cross-check
 
-Before moving to planning, reconcile two independent topic sources to ensure nothing is missed:
+Before moving to planning, reconcile three independent topic sources to ensure nothing is missed:
 
 **Source A: Discovered topics.** The topics found during Pass 1 (structural scan) and Pass 2 (deep code scan). These include cross-cutting features that don't map to a single directory (e.g., "LLM integration" spanning multiple packages, "authentication" touching frontend, backend, and CLI).
 
@@ -99,12 +115,14 @@ Before moving to planning, reconcile two independent topic sources to ensure not
 - For features: list every subdirectory under the feature directory (e.g., `src/features/`, `packages/frontend/src/features/`, or wherever the repo organizes features)
 - For systems: list the top-level source directories that contain service or module code
 
-**Reconciliation:** Merge both lists. For every item on either list, decide:
+**Source C: Behavioral code.** For every method or function identified in Pass 3 that orchestrates (calls multiple collaborators in sequence), decides (returns a choice with significant branching), or computes (a pure transformation), record it as a candidate business-logic page — wherever it lives, regardless of the surrounding directory or class name. Each must map to a workflow / policy / calculation page or an explicit skip with a reason. A non-trivial behavioral method with no business-logic page is a gap that must be justified: this is where revenue, compliance, and fraud logic actually live, and it is the code readers most often need to change.
+
+**Reconciliation:** Merge all three lists. For every item on any list, decide:
 
 1. **Wiki page** — the item becomes a planned page (or section within a page)
 2. **Skip with reason** — the item is intentionally excluded, with a specific reason (e.g., "empty directory — 0 source files", "deprecated — only test fixtures remain", "thin wrapper — covered in parent package page", "internal tooling — 3 files, not worth a standalone page")
 
-The discovered topics catch things that directories miss (cross-cutting concerns, emergent patterns). The directory enumeration catches things that discovery misses (features the agent didn't encounter in the files it read). Together they produce comprehensive coverage.
+The discovered topics catch things that directories miss (cross-cutting concerns, emergent patterns). The directory enumeration catches things that discovery misses (features the agent didn't encounter in the files it read). The behavioral-code pass catches the logic that both miss (orchestrators and policies buried inside any layer of the codebase, conventionally named or not). Together they produce comprehensive coverage.
 
 Silent omissions are not acceptable. If a source directory exists with non-trivial code and has no wiki topic, that's a gap that must be justified.
 
@@ -338,17 +356,18 @@ Page generation uses a top-level agent for orchestration and foundation pages, t
 
 ```
 1. SURVEY (top-level)
-   Structural scan + deep code scan
-   Produce: survey_context
+   Structural scan + deep code scan + business-logic discovery
+   Produce: survey_context (incl. business-logic topic list)
         │
         ▼
 2. PLAN (top-level)
-   Decide lens sections, list all pages, mark criticality
+   Decide lens sections, list all pages, mark criticality,
+   tag each business-logic page with its template (workflow/policy/calculation)
    Produce: page_plan (JSON with per-page briefs)
         │
         ▼
 3. FOUNDATION PAGES (top-level, sequential)
-   Write: overview/*, how-to-contribute/patterns-and-conventions
+   Write: index.md, overview/*, how-to-contribute/patterns-and-conventions
    These establish shared vocabulary and conventions
         │
         ├────────────────────────────────────────┐
@@ -358,6 +377,10 @@ Page generation uses a top-level agent for orchestration and foundation pages, t
     Normal pages: batched 3-5                  lore
     Each agent writes its page(s)              fun-facts
     + sub-pages if warranted
+    Business-logic pages: dedicated agent each,
+      MUST read references/business-logic.md
+      and use the workflow/policy/calculation template
+      (NOT the subsystem template)
         │                                        │
         ├────────────────────────────────────────┘
         ▼
@@ -386,12 +409,15 @@ After the survey, the top-level agent produces a **page plan** — a structured 
 
 - **Path** — the file path (e.g., `apps/cli/index.md`)
 - **Title** — the page heading
+- **Template** — which page template to use: `subsystem` (default for apps/systems/features/packages pages), `primitives` (foundational domain objects, see `references/domain-model.md`), or `workflow` / `policy` / `calculation` (business behavior, see `references/business-logic.md`). Tagging this at planning time is what ensures business-logic pages reach a sub-agent that knows to use the right template.
 - **Criticality** — `critical` (gets a dedicated sub-agent) or `normal` (batched with related pages)
 - **Content brief** — 2-3 sentences describing what the page should cover and what code paths to read
 - **Relevant source paths** — specific files/directories the sub-agent should read
 - **Related pages** — titles, paths, and one-line summaries of other pages being written, so the agent knows what to link to instead of explaining
 
-**Criticality guidelines:** Pages covering apps, packages, or features with large codebases, high churn, or central architectural roles are strong candidates for dedicated agents. Examples: a CLI with 50+ source files, a core library imported by most other packages, a feature that spans 5+ directories. The agent uses its judgment from the survey — these are guidelines, not hard rules.
+**Business-logic template rule.** Any `features/` or `systems/` topic whose main content is a decision or a process — not a structural description — must be planned with a business-logic template (`workflow`, `policy`, or `calculation`), not `subsystem`. If the page answers "how does the system decide X?" use `policy`. If it answers "what happens when Y?" use `workflow`. If it answers "how is Z computed?" use `calculation`. A page that answers "what does module M contain?" uses `subsystem`. When a topic has both structural and behavioral aspects (e.g., a fraud system with its own service layer and a branching decision engine), split it: a `systems/` page for the structural overview and a separate `policy` page for the decision logic, cross-linked.
+
+**Criticality guidelines:** Pages covering apps, packages, or features with large codebases, high churn, or central architectural roles are strong candidates for dedicated agents. Examples: a CLI with 50+ source files, a core library imported by most other packages, a feature that spans 5+ directories. Business-logic pages (workflow / policy / calculation) are also strong candidates for dedicated agents — their failure paths, configuration, and side effects are easy to get wrong when batched. The agent uses its judgment from the survey — these are guidelines, not hard rules.
 
 **Depth guidelines for sub-agents:** A single page should not try to cover a complex subsystem end-to-end. Sub-agents should create sub-pages when:
 
@@ -430,6 +456,7 @@ Two groups of sub-agents run in parallel:
 
 - **Critical pages** get a dedicated sub-agent each. The sub-agent reads the relevant code, writes the page, and autonomously decides whether sub-pages are warranted. If a topic has clearly distinct sub-areas, the agent creates sub-pages (capped at 2 levels: `section/page.md`). The top-level agent does NOT pre-plan sub-pages for critical pages — the sub-agent explores and decides.
 - **Normal pages** are batched 3-5 per sub-agent, grouped by relatedness (e.g., 3 small packages together, or 2 related features). Batched pages are typically single files without sub-pages.
+- **Business-logic pages** (any page whose plan `Template` is `workflow`, `policy`, or `calculation`) always get a dedicated sub-agent each — never batch them with subsystem pages. Their prompt MUST instruct the agent to read `references/business-logic.md` and follow the matching category template (workflow / policy / calculation), not the subsystem template in section 3b. This is the step that, when skipped, produces feature pages full of "Purpose / Directory layout / Key abstractions" sections with no Trigger, Steps, Rules, or Formula.
 
 **4b. Data pages** — run in parallel with lens pages since they only need git history and source file structure:
 
@@ -469,6 +496,7 @@ architecture, key patterns, glossary terms. Same for all agents.]
 ## Your Assignment
 Pages: [list of pages this agent is responsible for]
 Criticality: [critical or normal]
+Template: [subsystem | primitives | workflow | policy | calculation — from the page plan]
 Content brief: [2-3 sentences per page describing what to cover]
 Relevant source paths: [specific files/directories to read]
 
@@ -478,7 +506,13 @@ Relevant source paths: [specific files/directories to read]
 - ...
 
 ## Rules
-- Follow the page template (sections 3a-3e in the skill)
+- Use the page template named in your Assignment. For subsystem/primitives pages,
+  follow sections 3a-3e in this skill. For workflow/policy/calculation pages, you
+  MUST first read references/business-logic.md and follow the matching template
+  there (workflow: Trigger/Steps/State machine/Failure and recovery/Side effects/
+  Concurrency; policy: Inputs/Output/Rules/Configuration/Versioning/Examples;
+  calculation: Signature/Formula/Inputs/Constants/Edge cases). Do not fall back
+  to the subsystem template for a business-logic page.
 - Maximum nesting: 2 levels (section/page.md)
 - For critical pages: explore the code and create sub-pages if the topic
   has clearly distinct sub-areas. Write both the index.md and sub-pages.
