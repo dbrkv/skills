@@ -3,14 +3,15 @@ name: wiki
 version: 1.0.0
 description: |
   Generate comprehensive codebase documentation for a repository.
-  Uploads the wiki to view in the Factory app.
+  Produces a structured markdown wiki directory that can be read by any
+  markdown viewer or static site generator.
 user-invocable: true
 disable-model-invocation: true
 ---
 
 # Wiki generation
 
-Read a repository, then produce a set of interconnected documentation pages that explain what the code does and how it fits together. The output is a `droid-wiki/` directory of markdown files, uploaded to Factory via `droid wiki-upload`.
+Read a repository, then produce a set of interconnected documentation pages that explain what the code does and how it fits together. The output is a `wiki/` directory of markdown files, ready to be read by any markdown viewer or published with a static site generator.
 
 ## 1. Survey the repository
 
@@ -136,7 +137,7 @@ Include these sections:
 
 - **Size** — lines of code by language (with a Mermaid horizontal bar chart), total source files vs test files vs config files, package/module count for monorepos
 - **Activity** — commits per week/month (recent trend), most actively changed files/directories in the last 90 days (churn hotspots)
-- **Bot-attributed commits** — percentage of commits with bot co-authorship (e.g., `Co-authored-by: factory-droid[bot]`, `dependabot[bot]`, `github-actions[bot]`, `copilot[bot]`). This is a lower bound on AI-assisted work since inline AI tools like Copilot leave no trace in git history. Be transparent about what's counted.
+- **Bot-attributed commits** — percentage of commits with bot co-authorship (e.g., `Co-authored-by: dependabot[bot]`, `github-actions[bot]`, `copilot[bot]`, or any `<name>[bot]` account). This is a lower bound on AI-assisted work since inline AI tools like Copilot leave no trace in git history. Be transparent about what's counted.
 - **Complexity** — average file size by directory, deepest import chains, number of exported symbols per package
 
 Use Mermaid `xychart-beta` (horizontal bar charts) for language breakdown and any other stat where a visual helps. Do NOT use Mermaid `pie` charts — they are not supported by the renderer. Use tables for lists of files/directories.
@@ -186,7 +187,7 @@ Five lenses are available for organizing the codebase deep-dives. Use any combin
 **Choosing labels:** Mirror the repo's own vocabulary. If the repo has an `apps/` directory, call the section `apps/`, not `applications/`. If the repo calls things "services," use `services/`. The default labels are fallbacks for when the repo has no existing convention.
 
 **Placement rules:**
-- Place each concept where the repo's structure suggests it belongs. If agent logic lives in `packages/droid-core`, document it under packages, not systems.
+- Place each concept where the repo's structure suggests it belongs. If agent logic lives in `packages/agent-core`, document it under packages, not systems.
 - The systems lens is for things that don't have a natural home in apps or packages -- emergent architectural patterns, cross-package systems, infrastructure that spans multiple directories.
 - Do not duplicate content across lenses. If something is documented under packages, the relevant app page should cross-link to it, not repeat it.
 
@@ -266,7 +267,7 @@ Active contributors: alice, bob
 
 Derive the names from CODEOWNERS (if available) merged with the top 2-3 recent committers from git blame for that subsystem's directory. Use first names or GitHub usernames, no @ symbols.
 
-**Exclude bot accounts** from contributor lists — filter out usernames ending in `[bot]` (e.g., `factory-droid[bot]`, `dependabot[bot]`, `github-actions[bot]`). Bots are not people you'd reach out to with questions. This applies to both the per-page active contributors byline and the maintainers page.
+**Exclude bot accounts** from contributor lists — filter out usernames ending in `[bot]` (e.g., `dependabot[bot]`, `github-actions[bot]`, `renovate[bot]`). Bots are not people you'd reach out to with questions. This applies to both the per-page active contributors byline and the maintainers page.
 
 **Use the default branch for contributor data.** When deriving contributors from git blame or git log, always query against the default branch (`main` or `dev`), not the current branch. Feature branches skew contributor data toward whoever is working on that branch. Use `git log origin/main -- <path>` or `git log origin/dev -- <path>` to get accurate contributor history.
 
@@ -279,7 +280,7 @@ These appear at the end of every wiki:
 
 ### Page ordering
 
-The sidebar ordering is critical for navigation. Every page must appear in its defined position — do NOT group childless pages together at the top or bottom.
+The page ordering is critical for navigation. Every page must appear in its defined position — do NOT group childless pages together at the top or bottom.
 
 The full ordering in the wiki is:
 
@@ -296,7 +297,7 @@ The full ordering in the wiki is:
 **Ordering rules:**
 
 - Each page stays in its defined position regardless of whether it has children. `by-the-numbers.md` appears after `overview/` even though it has no children, not at the top with other childless pages.
-- The `pageOrder` array in `.wiki-meta.json` must exactly follow this ordering. It controls the sidebar display order.
+- The `pageOrder` array in `.wiki-meta.json` must exactly follow this ordering. It is the ordering hint provided to markdown viewers and static site generators.
 - Within a lens section (e.g., `apps/`), order pages from most important to least important. The `index.md` is always first.
 - Conditional sections appear in the order listed above (api → deployment → security → how-to-monitor → background → cleanup-opportunities), not alphabetically.
 
@@ -319,7 +320,7 @@ The full ordering in the wiki is:
 Page titles (the `# Heading` at the top of each `.md` file) should be concise noun phrases that match how the team refers to the thing. The section hierarchy already provides context, so titles should not repeat it.
 
 - **Don't prepend directory paths.** Title is "CLI", not "apps/cli — CLI Architecture".
-- **Don't append generic suffixes.** Title is "Apps", not "Apps Overview". Title is "Packages", not "Packages — Overview". The only exception is `overview/index.md` which may include the project name (e.g., "Factory platform overview").
+- **Don't append generic suffixes.** Title is "Apps", not "Apps Overview". Title is "Packages", not "Packages — Overview". The only exception is `overview/index.md` which may include the project name (e.g., "Acme platform overview").
 - **Don't repeat the parent section name.** A page at `features/sessions.md` is titled "Sessions", not "Features — Sessions".
 - **Match the team's vocabulary.** If the team calls it "the daemon", title is "Daemon", not "Background Service Process".
 - **Keep it short.** Aim for 1-3 words. If a title needs more, the page probably covers too much and should be split.
@@ -362,12 +363,17 @@ Page generation uses a top-level agent for orchestration and foundation pages, t
    reference/ + maintainers.md
         │
         ▼
-6. ASSEMBLY (top-level)
+ 6. ASSEMBLY (top-level)
    Cross-link audit, .wiki-meta.json
-        │
-        ▼
-7. UPLOAD
+   Write wiki directory to its final location
+         │
+         ▼
+ 7. VIEWER (optional, top-level)
+   If the user asked for a hosted/browsable web UI,
+   run the bundled VitePress adapter against .wiki-meta.json
+   to emit .vitepress/config.ts + package.json
 ```
+
 
 ### Step 2: Planning and delegation
 
@@ -572,7 +578,7 @@ Do not force all of these into every wiki. Pick only the ones where the repo has
 
 ## 4. Write the meta file
 
-After generating all pages, create `.wiki-meta.json` in the wiki directory root. The `pageOrder` array is critical -- it controls the display order of pages in the wiki sidebar. List every generated file path in the exact order you want them to appear. Without this, pages sort alphabetically.
+After generating all pages, create `.wiki-meta.json` in the wiki directory root. The `pageOrder` array is a hint for markdown viewers and static site generators that want to preserve authoring order — it lets a renderer surface pages in the order below rather than falling back to alphabetical sort. List every generated file path in the exact order you want them to appear.
 
 ```json
 {
@@ -635,43 +641,59 @@ After generating all pages, create `.wiki-meta.json` in the wiki directory root.
 
 The example above is abbreviated. In practice, list every `.md` file in the wiki directory. The order must match the page ordering defined in Section 2: overview → by-the-numbers → lore → fun-facts → how-to-contribute → lenses → conditional → reference → maintainers.
 
-## 5. Upload
+## 5. Write the wiki to disk
 
-### Standard upload (local wiki directory)
+The wiki is a plain directory of markdown files. There is no product-specific upload step — write all pages directly to the final destination directory so they can be read by any markdown viewer, committed to the repo, or published with a static site generator (e.g., Docusaurus, MkDocs, VitePress, Hugo, GitHub Pages).
 
-When the user wants to keep a local copy (the default):
+### Default output location
 
-```bash
-droid wiki-upload \
-  --repo-url "$REPO_URL" \
-  --wiki-dir ./droid-wiki
+Write to a `wiki/` directory at the repository root unless the user asks for a different location:
+
+```
+<repo-root>/wiki/
+├── .wiki-meta.json
+├── overview/
+│   └── ...
+└── ...
 ```
 
-Arguments:
+If the user specifies a destination (e.g., `docs/wiki/`, a sibling repository, or a specific path), honor it.
 
-- `--repo-url` — the repository URL (the remote origin, e.g., `https://github.com/org/repo`)
-- `--wiki-dir` — path to the directory containing the generated markdown files
-- `--cleanup` — (optional) delete the wiki directory after a successful upload
+### When the user does not want files left on disk
 
-### Remote-only upload (--no-local handling)
-
-When the user asks to generate the wiki without leaving files on disk (e.g., the user says "don't leave files locally" or passes a `--no-local` flag):
+If the user explicitly asks not to leave the wiki on disk (e.g., "generate to a temp directory and don't keep it"), write to a temporary directory and let the user move or discard it:
 
 ```bash
-# Create a temporary directory
 WIKI_TMPDIR=$(mktemp -d)
-
-# Write all wiki files to the temporary directory instead of ./droid-wiki
+# Write all wiki files into $WIKI_TMPDIR
 # ... generate pages into $WIKI_TMPDIR ...
-
-# Upload with --cleanup to remove the temp directory after success
-droid wiki-upload \
-  --repo-url "$REPO_URL" \
-  --wiki-dir "$WIKI_TMPDIR" \
-  --cleanup
+# Hand the path back to the user; they decide whether to keep or delete it
 ```
 
-The `--cleanup` flag tells the CLI to delete the `--wiki-dir` directory after a successful upload. If the upload fails, the directory is preserved so the user can retry.
+### Publishing (optional)
+
+The skill produces only markdown by default. When the user wants a hosted, browsable web UI, the skill can scaffold an embedded VitePress site inside the wiki directory (see Section 6 below). For other publishing targets (MkDocs, Quartz, GitHub Pages, etc.), the user provides the integration — the generated directory is already in a layout most static site generators expect.
+
+## 6. Optional: embedded web viewer (VitePress)
+
+By default the wiki is plain markdown. If the user wants a hosted, browsable web UI (phrases like "web view", "host the wiki", "browse the docs", "publish online", "preview the wiki", "set up a docs site"), scaffold an embedded VitePress site inside the wiki directory. VitePress is purely additive — the markdown files continue to work without it, and all viewer artifacts live inside `wiki/` so the directory stays self-contained and portable.
+
+### When to enable
+
+Default: do **not** enable. Enable only when the user explicitly asks for a web view, hosting, or a docs site. If the intent is ambiguous, ask once: "Do you want a hosted web view of the wiki, or just the markdown?" When in doubt, leave it out — the user can enable it later by re-running the adapter.
+
+### Setup
+
+The bundled adapter reads `.wiki-meta.json` (written in Section 4) and emits a complete VitePress configuration inside `<wiki-dir>/`:
+
+```bash
+node <skill-path>/scripts/setup-vitepress.mjs <wiki-dir>
+cd <wiki-dir> && npm install && npm run docs:dev
+```
+
+The skill owns the generated config (`config.ts`, `package.json`); re-run the adapter whenever the wiki is regenerated. User customizations under `.vitepress/theme/` are preserved across runs.
+
+For everything else — prerequisites, the full file list the adapter writes, customization (theme, navbar, sidebar), Mermaid and search setup, troubleshooting, and how to disable the viewer — read `references/vitepress.md`.
 
 ## Content principles
 
@@ -742,7 +764,7 @@ Include at least one Mermaid diagram in the architecture page. Include diagrams 
 The generated wiki follows this layout:
 
 ```
-droid-wiki/
+wiki/
 ├── .wiki-meta.json
 
 # Always present (in this order)
@@ -825,10 +847,10 @@ droid-wiki/
 
 **Rules:**
 
-- Every `.md` file must start with a level-1 heading (`# Title`). The upload tool extracts the title from this heading.
+- Every `.md` file must start with a level-1 heading (`# Title`). The heading serves as the page title for viewers and static site generators.
 - Every directory must contain an `index.md`.
 - File names use lowercase with hyphens. No spaces, no uppercase.
-- The `.wiki-meta.json` file is for tracking purposes and is not uploaded as a page.
+- The `.wiki-meta.json` file is optional metadata (page ordering, generation timestamp) for viewers that support it and is not rendered as a page.
 - The four pages inside `overview/` (`index.md`, `architecture.md`, `getting-started.md`, `glossary.md`) are always single files. All other pages can expand into directories with sub-pages.
 - Maximum tree depth: 2 levels from any lens root (e.g., `apps/cli/command-structure.md`). No deeper.
 - For large repos, critical sub-agents decide whether to split into sub-pages. A complex subsystem like an editor core or extension host should have its own directory with focused sub-pages, not a single monolithic page.
