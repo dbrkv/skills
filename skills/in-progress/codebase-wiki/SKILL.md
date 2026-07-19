@@ -48,6 +48,7 @@ The structural scan catches what's visible from directory names and config files
 - Look inside `src/features/`, `src/modules/`, `src/domains/`, or equivalent directories — the names and contents reveal product capabilities
 - Scan for service classes, event handlers, and job/worker definitions — these reveal background systems
 - Check for domain-specific directories that don't map to obvious top-level names
+- Look for the domain model even when there's no `domain/` directory. Recurring nouns in class/struct/table names, past-tense event types, and domain-named exceptions (`InsufficientFundsError`, `OverlappingReservationError`) all reveal foundational concepts that may warrant their own `primitives/` pages. See `references/domain-model.md` for the full discovery playbook.
 
 The goal is to discover the **complete list of topics** the wiki should cover. The structural scan gives you the skeleton; the deep scan fills in the muscle. A feature like "Analytics" might not have its own top-level directory but lives inside `src/features/analytics/` or is revealed by a set of feature flags and API endpoints.
 
@@ -195,7 +196,7 @@ Five lenses are available for organizing the codebase deep-dives. Use any combin
 - If it has its own entry point and deployment, it's an **application**
 - If it's a workspace package that other packages import, it's a **package**
 - If it's a module with internal logic and clear boundaries that doesn't map to a single package, it's a **system**
-- If it's a type or concept that appears in 3+ systems, it's a **primitive**
+- If it's a type or concept that appears in 3+ systems, it's a **primitive**. Identifying primitives — and telling them apart from one-off types — takes more than directory spelunking: the model lives in fields, methods, events, and validation code spread across many files. Read `references/domain-model.md` before generating any `primitives/` page. It covers discovery signals (lexical, structural, behavioral, lifecycle, invariant, event), per-language probes, aggregate boundaries, ubiquitous language, a primitives-specific page template, and a worked example.
 - If understanding it requires tracing through multiple systems or apps, it's a **feature**
 
 ### Conditional sections
@@ -505,6 +506,8 @@ Each domain page should include these sections (skip any that don't apply to the
 6. **Entry points for modification** — 2-3 sentences telling a developer where to start if they need to change or extend this subsystem
 
 Let the complexity of the subsystem determine how long the page is. A thin wrapper might only need sections 1, 3, and 5. A complex subsystem might need all six with multiple diagrams.
+
+**Primitives pages use a different template.** Foundational domain objects are documented by their behavior, rules, and vocabulary — not their directory layout. Use the primitives-specific template in `references/domain-model.md` (shape, lifecycle, invariants, relationships, events emitted) instead of the subsystem template above. The reference also covers how to discover these objects when they're implicit rather than declared.
 
 ### 3c. Add Mermaid diagrams
 
