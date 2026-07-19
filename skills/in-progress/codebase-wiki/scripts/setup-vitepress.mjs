@@ -150,6 +150,12 @@ function buildSidebar(wikiDir, meta) {
   const sectionFirstSeen = [];
 
   for (const mdPath of pageOrder) {
+    // The root index.md is the wiki landing page. It already has a dedicated
+    // Home link in the navbar (see buildConfigTs), so don't also emit it as a
+    // sidebar entry — otherwise it shows up as a stray top-level link at the
+    // bottom of the sidebar (it isn't in topLevelSections) duplicating Home.
+    if (mdPath === 'index.md') continue;
+
     const parts = mdPath.split('/');
     const topSection = parts[0].replace(/\.md$/, '');
 

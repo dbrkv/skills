@@ -116,14 +116,15 @@ Design a page tree before writing any prose. The wiki has three tiers of content
 
 These pages appear in every wiki, in this order:
 
-1. `overview/` — introductory material grouped under one section
+1. `index.md` — wiki-root landing page. Its level-1 heading is the project name (e.g., "Acme platform"); the same heading is used as the site title by static site generators. The body is a one-to-two sentence summary of the project followed by links to the main sections (`overview/`, `how-to-contribute/`, and whichever lens sections the wiki has). This file is required: it is the only file that serves the root route (`/`), so without it every static site generator (VitePress, MkDocs, Hugo, Docusaurus, GitHub Pages) returns a 404 on first load.
+2. `overview/` — introductory material grouped under one section
    - `index.md` — project overview: what it does, who uses it, quick links
    - `architecture.md` — system architecture with Mermaid diagrams
    - `getting-started.md` — prerequisites, install, build, test, run
    - `glossary.md` — project-specific terms and domain vocabulary
-2. `by-the-numbers.md` — codebase statistics snapshot (see below)
-3. `lore.md` — timeline and history of the codebase (see below)
-4. `how-to-contribute/` — how to work in this codebase
+3. `by-the-numbers.md` — codebase statistics snapshot (see below)
+4. `lore.md` — timeline and history of the codebase (see below)
+5. `how-to-contribute/` — how to work in this codebase
    - `index.md` — work pickup, PR process, review expectations, definition of done
    - `development-workflow.md` — branch, code, test, PR, merge cycle
    - `testing.md` — frameworks, patterns, how to run, mock, and cover
@@ -286,18 +287,20 @@ The page ordering is critical for navigation. Every page must appear in its defi
 
 The full ordering in the wiki is:
 
-1. overview/ (index, architecture, getting-started, glossary)
-2. by-the-numbers.md (if present)
-3. lore.md (if present)
-4. fun-facts.md (if present)
-5. how-to-contribute/
-6. [organizational lenses, in whatever order makes sense]
-7. [conditional sections: api, deployment, security, how-to-monitor, background, cleanup-opportunities]
-8. reference/
-9. maintainers.md (if applicable, always last)
+1. index.md (root landing page)
+2. overview/ (index, architecture, getting-started, glossary)
+3. by-the-numbers.md (if present)
+4. lore.md (if present)
+5. fun-facts.md (if present)
+6. how-to-contribute/
+7. [organizational lenses, in whatever order makes sense]
+8. [conditional sections: api, deployment, security, how-to-monitor, background, cleanup-opportunities]
+9. reference/
+10. maintainers.md (if applicable, always last)
 
 **Ordering rules:**
 
+- The root `index.md` is always first. It is a landing page, not a section — do not list it in `topLevelSections`. Static site generators and the bundled VitePress adapter treat it as the homepage and exclude it from the sidebar (it is already reachable via the Home nav link).
 - Each page stays in its defined position regardless of whether it has children. `by-the-numbers.md` appears after `overview/` even though it has no children, not at the top with other childless pages.
 - The `pageOrder` array in `.wiki-meta.json` must exactly follow this ordering. It is the ordering hint provided to markdown viewers and static site generators.
 - Within a lens section (e.g., `apps/`), order pages from most important to least important. The `index.md` is always first.
@@ -410,11 +413,12 @@ Examples of when NOT to split:
 
 The top-level agent writes these pages sequentially before any sub-agents run:
 
-1. `overview/index.md` — project overview
-2. `overview/architecture.md` — system architecture with Mermaid diagrams
-3. `overview/getting-started.md` — prerequisites, install, build, test, run
-4. `overview/glossary.md` — project-specific terms
-5. `how-to-contribute/patterns-and-conventions.md` — coding patterns and conventions
+1. `index.md` — root landing page. Level-1 heading is the project name (used as the site title by static site generators). Body is a one-to-two sentence project summary plus links to the main sections planned in Step 2 (`overview/`, `how-to-contribute/`, and the lens sections like `apps/`, `features/`, `systems/`). The section list is already known from the page plan, so the forward links resolve once the target pages are written.
+2. `overview/index.md` — project overview
+3. `overview/architecture.md` — system architecture with Mermaid diagrams
+4. `overview/getting-started.md` — prerequisites, install, build, test, run
+5. `overview/glossary.md` — project-specific terms
+6. `how-to-contribute/patterns-and-conventions.md` — coding patterns and conventions
 
 These pages establish the shared vocabulary and architectural context that sub-agents reference. They must be complete before delegation begins.
 
@@ -592,6 +596,7 @@ After generating all pages, create `.wiki-meta.json` in the wiki directory root.
   "pageCount": 42,
   "topLevelSections": ["overview", "by-the-numbers", "lore", "fun-facts", "how-to-contribute", "apps", "systems", "features", "packages", "primitives", "api", "deployment", "security", "how-to-monitor", "background", "cleanup-opportunities", "reference", "maintainers"],
   "pageOrder": [
+    "index.md",
     "overview/index.md",
     "overview/architecture.md",
     "overview/getting-started.md",
@@ -645,7 +650,7 @@ After generating all pages, create `.wiki-meta.json` in the wiki directory root.
 }
 ```
 
-The example above is abbreviated. In practice, list every `.md` file in the wiki directory. The order must match the page ordering defined in Section 2: overview → by-the-numbers → lore → fun-facts → how-to-contribute → lenses → conditional → reference → maintainers.
+The example above is abbreviated. In practice, list every `.md` file in the wiki directory. The order must match the page ordering defined in Section 2: index.md (landing) → overview → by-the-numbers → lore → fun-facts → how-to-contribute → lenses → conditional → reference → maintainers.
 
 ## 5. Write the wiki to disk
 
@@ -658,6 +663,7 @@ Write to a `wiki/` directory at the repository root unless the user asks for a d
 ```
 <repo-root>/wiki/
 ├── .wiki-meta.json
+├── index.md
 ├── overview/
 │   └── ...
 └── ...
@@ -774,6 +780,7 @@ wiki/
 ├── .wiki-meta.json
 
 # Always present (in this order)
+├── index.md                              # Root landing page (serves / for static site generators)
 ├── overview/                             # Introductory material
 │   ├── index.md                          # Project overview
 │   ├── architecture.md                   # System architecture with Mermaid diagrams
@@ -853,7 +860,8 @@ wiki/
 
 **Rules:**
 
-- Every `.md` file must start with a level-1 heading (`# Title`). The heading serves as the page title for viewers and static site generators.
+- Every `.md` file must start with a level-1 heading (`# Title`). The heading serves as the page title for viewers and static site generators. The root `index.md` heading is also used as the site title.
+- The root `index.md` is required. It is the only file that serves the root route (`/`); without it, every static site generator returns a 404 on the homepage. Do not list it in `topLevelSections` — it is a landing page, not a content section.
 - Every directory must contain an `index.md`.
 - File names use lowercase with hyphens. No spaces, no uppercase.
 - The `.wiki-meta.json` file is optional metadata (page ordering, generation timestamp) for viewers that support it and is not rendered as a page.
