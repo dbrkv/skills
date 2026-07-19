@@ -145,7 +145,7 @@ function stripOverviewSuffix(title) {
 function buildSidebar(wikiDir, meta) {
   const pageOrder = Array.isArray(meta.pageOrder) ? meta.pageOrder : [];
 
-  // sectionName -> { orderedItems: [{text, link, subgroup?}] }
+  // sectionName -> [{ mdPath, text, link, subgroup? }]
   const sectionMap = new Map();
   const sectionFirstSeen = [];
 
@@ -154,16 +154,16 @@ function buildSidebar(wikiDir, meta) {
     const topSection = parts[0].replace(/\.md$/, '');
 
     if (!sectionMap.has(topSection)) {
-      sectionMap.set(topSection, { orderedItems: [] });
+      sectionMap.set(topSection, []);
       sectionFirstSeen.push(topSection);
     }
 
     const title = readTitle(join(wikiDir, mdPath));
     const link = toLink(mdPath);
-    const item = { text: title, link };
+    const item = { mdPath, text: title, link };
     if (parts.length > 2) item.subgroup = parts[1];
 
-    sectionMap.get(topSection).orderedItems.push(item);
+    sectionMap.get(topSection).push(item);
   }
 
   // Use topLevelSections for ordering if present; otherwise fall back to first-seen order.
@@ -180,40 +180,75 @@ function buildSidebar(wikiDir, meta) {
 
   const sidebar = [];
   for (const sectionName of orderedSections) {
-    const { orderedItems } = sectionMap.get(sectionName);
+    const items = sectionMap.get(sectionName);
 
     // Single bare page (no nested items) -> top-level link, no group wrapper.
-    if (orderedItems.length === 1 && !orderedItems[0].subgroup) {
-      sidebar.push({ text: orderedItems[0].text, link: orderedItems[0].link });
+    if (items.length === 1 && !items[0].subgroup) {
+      sidebar.push({ text: items[0].text, link: items[0].link });
       continue;
     }
 
     const groupItems = [];
-    let currentSubgroup = null;
+    // label -> subgroup group object. Keying by label (rather than only the
+    // "current" one) lets a subgroup be reopened when its items are not
+    // contiguous in pageOrder, so a directory is never split across two
+    // same-labeled groups.
+    const subgroupByLabel = new Map();
+    let sectionLink = null;
+    const sectionIndexRel = `${sectionName}/index.md`;
 
-    for (const item of orderedItems) {
+    for (const item of items) {
       if (item.subgroup) {
         const subLabel = humanize(item.subgroup);
-        if (!currentSubgroup || currentSubgroup.text !== subLabel) {
-          currentSubgroup = {
-            text: subLabel,
-            collapsed: false,
-            items: [],
-          };
-          groupItems.push(currentSubgroup);
+        let group = subgroupByLabel.get(subLabel);
+        if (!group) {
+          group = { text: subLabel, collapsed: false, items: [] };
+          subgroupByLabel.set(subLabel, group);
+          groupItems.push(group);
         }
-        currentSubgroup.items.push({ text: item.text, link: item.link });
+        // Hoist a directory's own index.md onto its group as the link, instead
+        // of rendering a redundant inner item ("CLI > CLI").
+        const subgroupIndexRel = `${sectionName}/${item.subgroup}/index.md`;
+        if (item.mdPath === subgroupIndexRel) {
+          if (group.link == null) group.link = item.link;
+          continue;
+        }
+        group.items.push({ text: item.text, link: item.link });
       } else {
+        // Hoist the section's own index.md onto the section group as the link.
+        if (item.mdPath === sectionIndexRel) {
+          if (sectionLink == null) sectionLink = item.link;
+          continue;
+        }
         groupItems.push({ text: item.text, link: item.link });
-        currentSubgroup = null;
       }
     }
 
-    sidebar.push({
+    // A subgroup that contributed only its hoisted index becomes a bare link
+    // instead of an empty collapsible.
+    const normalizedGroupItems = [];
+    for (const gi of groupItems) {
+      if (gi.items && gi.items.length === 0) {
+        if (gi.link != null) normalizedGroupItems.push({ text: gi.text, link: gi.link });
+      } else {
+        normalizedGroupItems.push(gi);
+      }
+    }
+
+    const sectionGroup = {
       text: humanize(sectionName),
       collapsed: false,
-      items: groupItems,
-    });
+      items: normalizedGroupItems,
+    };
+    if (sectionLink != null) sectionGroup.link = sectionLink;
+
+    // A section that contributed only its hoisted index becomes a bare
+    // top-level link instead of an empty collapsible.
+    if (normalizedGroupItems.length === 0 && sectionLink != null) {
+      sidebar.push({ text: sectionGroup.text, link: sectionLink });
+    } else {
+      sidebar.push(sectionGroup);
+    }
   }
 
   return sidebar;
@@ -276,7 +311,7 @@ function buildPackageJson() {
   };
 }
 
-function buildConfigTs({ title, description, sidebar, mermaidStartWordCount }) {
+function buildConfigTs({ title, description, sidebar }) {
   const config = {
     title,
     description: description || `${title} — generated wiki`,
