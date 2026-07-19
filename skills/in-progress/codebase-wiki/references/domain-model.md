@@ -55,6 +55,8 @@ Read this when generating:
 
 Skip it for pure infrastructure (caching layers, telemetry, build tooling) — there is no business domain there.
 
+This reference covers the **structural** half of the domain (what things are). For the **behavioral** half — workflows, decisions, calculations, and cross-aggregate rules — read `business-logic.md`. The two are complementary: if a page's main content is "what fields does this thing have and what states can it be in", use this reference; if it's "how does the system decide X" or "what happens when Y", use `business-logic.md`.
+
 ## Discovery signals
 
 Domain models reveal themselves through several independent signals. Combine them: each catches a different facet of the model that the others miss. A signal found by only one method is worth confirming; a signal found by three methods is almost certainly core.

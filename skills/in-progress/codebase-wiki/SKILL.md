@@ -49,6 +49,7 @@ The structural scan catches what's visible from directory names and config files
 - Scan for service classes, event handlers, and job/worker definitions — these reveal background systems
 - Check for domain-specific directories that don't map to obvious top-level names
 - Look for the domain model even when there's no `domain/` directory. Recurring nouns in class/struct/table names, past-tense event types, and domain-named exceptions (`InsufficientFundsError`, `OverlappingReservationError`) all reveal foundational concepts that may warrant their own `primitives/` pages. See `references/domain-model.md` for the full discovery playbook.
+- Look for business logic, not just domain objects. Multi-step workflows (orchestrators, sagas, queue processors, workflow-engine definitions), decisions and policies (pricing, eligibility, fraud, strategy/policy classes, rule engines, decision tables), pure calculations (formulas, currency conversion, scoring), and cross-aggregate rules (partial unique indexes, exclusion constraints, advisory locks) all deserve their own pages — usually under `features/` or `systems/`. See `references/business-logic.md` for category-specific discovery signals and page templates.
 
 The goal is to discover the **complete list of topics** the wiki should cover. The structural scan gives you the skeleton; the deep scan fills in the muscle. A feature like "Analytics" might not have its own top-level directory but lives inside `src/features/analytics/` or is revealed by a set of feature flags and API endpoints.
 
@@ -508,6 +509,8 @@ Each domain page should include these sections (skip any that don't apply to the
 Let the complexity of the subsystem determine how long the page is. A thin wrapper might only need sections 1, 3, and 5. A complex subsystem might need all six with multiple diagrams.
 
 **Primitives pages use a different template.** Foundational domain objects are documented by their behavior, rules, and vocabulary — not their directory layout. Use the primitives-specific template in `references/domain-model.md` (shape, lifecycle, invariants, relationships, events emitted) instead of the subsystem template above. The reference also covers how to discover these objects when they're implicit rather than declared.
+
+**Workflow, policy, and calculation pages use a different template too.** Business behavior is documented by its steps, branches, and side effects — not its directory layout. Use the category-specific templates in `references/business-logic.md` (workflow, policy, calculation) for pages whose main content is "how does the system decide X" or "what happens when Y". Cross-aggregate rules live on whichever page is the natural entry point (usually the enforcing workflow or service), with one-line pointers on each affected primitives page.
 
 ### 3c. Add Mermaid diagrams
 
