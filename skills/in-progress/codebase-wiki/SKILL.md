@@ -1,5 +1,5 @@
 ---
-name: wiki
+name: codebase-wiki
 version: 1.0.0
 description: |
   Generate comprehensive codebase documentation for a repository.
@@ -9,7 +9,7 @@ user-invocable: true
 disable-model-invocation: true
 ---
 
-# Wiki generation
+# Codebase wiki
 
 Read a repository, then produce a set of interconnected documentation pages that explain what the code does and how it fits together. The output is a `wiki/` directory of markdown files, ready to be read by any markdown viewer or published with a static site generator.
 
