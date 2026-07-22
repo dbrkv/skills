@@ -21,3 +21,4 @@ Each skill lives in one of three directories:
 ## Skills
 
 - **codebase-wiki** (`incubator/`) — build and maintain a codebase wiki: interconnected markdown pages explaining what the code does and how it fits together. Based on the [Factory `droid-evolved` wiki skill](https://github.com/Factory-AI/factory-plugins/tree/master/plugins/droid-evolved/skills/wiki).
+- **code-security-review** (`incubator/`) — review code changes for security vulnerabilities using STRIDE threat modeling. Generates a threat model, scans git changes across all STRIDE categories, and validates findings for exploitability before reporting. Adapted from the Factory `security-engineer` plugin for cross-agent compatibility.
