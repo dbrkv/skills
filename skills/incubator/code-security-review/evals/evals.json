@@ -1,0 +1,80 @@
+{
+  "skill_name": "code-security-review",
+  "evals": [
+    {
+      "id": 1,
+      "name": "node-express-true-positives",
+      "prompt": "Run a security review of the Node.js/Express project located at evals/files/node-express-tp. Treat every file in that directory as newly-added code that needs auditing before merge. I want a real vulnerability scan, not a superficial read. Produce the skill's standard .security/ artifacts (threat model, config, findings, validated-findings, and a report). Place the entire .security/ directory into the provided outputs directory when you are done.",
+      "expected_output": "A validated-findings.json that CONFIRMS at least the SQL injection in users.js, the hardcoded secrets in config.js, and the stored XSS in notes.js, plus a human-readable report.md.",
+      "files": ["evals/files/node-express-tp"],
+      "expectations": [
+        "A .security/validated-findings.json file was produced in the outputs directory",
+        "validated-findings.json is valid JSON with a top-level summary object containing confirmed, false_positives, and needs_manual_review integer fields",
+        "The validated findings include a CONFIRMED SQL Injection finding (cwe CWE-89) located in src/routes/users.js",
+        "The validated findings include a CONFIRMED finding for hardcoded credentials/secrets (cwe CWE-798) located in src/config.js",
+        "The validated findings include a CONFIRMED stored XSS finding (cwe CWE-79) located in src/routes/notes.js",
+        "Each confirmed finding includes a recommendation field and a validated_severity",
+        "A .security/report.md file was produced and is non-empty",
+        "At least one of the high/critical findings includes a proof_of_concept with a payload"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "python-flask-true-positives",
+      "prompt": "Please audit the Python/Flask service at evals/files/python-flask-tp for security vulnerabilities before we deploy it. Scan all the code and validate anything you find. Produce the skill's standard .security/ artifacts and place the .security/ directory into the provided outputs directory.",
+      "expected_output": "A validated-findings.json that CONFIRMS command injection (/ping), path traversal (/download), and SSRF (/preview), plus report.md.",
+      "files": ["evals/files/python-flask-tp"],
+      "expectations": [
+        "A .security/validated-findings.json file was produced in the outputs directory",
+        "validated-findings.json is valid JSON",
+        "A CONFIRMED command injection finding (cwe CWE-78) for the /ping endpoint is present",
+        "A CONFIRMED path traversal finding (cwe CWE-22) for the /download endpoint is present",
+        "A CONFIRMED SSRF finding (cwe CWE-918) for the /preview endpoint is present",
+        "A .security/report.md file was produced and is non-empty"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "mitigated-false-positives",
+      "prompt": "Run a security review on the catalog API at evals/files/mitigated-fp. This codebase was recently hardened, so I expect it to be clean — please verify that thoroughly (don't just trust the 'hardened' comment). Produce the skill's standard .security/ artifacts and place the .security/ directory into the provided outputs directory.",
+      "expected_output": "A validated-findings.json with ZERO confirmed findings. Any patterns the scan flags as suspicious should be filtered into false_positives or needs_manual_review, not CONFIRMED — the parameterized queries and validation middleware are real mitigations.",
+      "files": ["evals/files/mitigated-fp"],
+      "expectations": [
+        "A .security/validated-findings.json file was produced in the outputs directory",
+        "validated-findings.json summary.confirmed equals 0 (no confirmed vulnerabilities)",
+        "No finding marks the parameterized query in src/routes/products.js as a CONFIRMED SQL injection",
+        "No finding marks src/routes/profile.js as a CONFIRMED XSS vulnerability (the manual escaping is a mitigation)",
+        "Any suspicious patterns the scan raised appear in false_positives or needs_manual_review rather than as CONFIRMED",
+        "A .security/report.md file was produced and states that there are no confirmed findings"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "mixed-real-and-mitigated",
+      "prompt": "Security-check the billing service at evals/files/mixed-real-mitigated. Scan the full change set and validate each finding so I know what's real. Produce the skill's standard .security/ artifacts and place the .security/ directory into the provided outputs directory.",
+      "expected_output": "The real SQL injection in admin_users.js is CONFIRMED, while the parameterized query in products.js is NOT flagged. Tests that the skill validates rather than just pattern-matching.",
+      "files": ["evals/files/mixed-real-mitigated"],
+      "expectations": [
+        "A .security/validated-findings.json file was produced in the outputs directory",
+        "validated-findings.json is valid JSON",
+        "The SQL injection in src/routes/admin_users.js is CONFIRMED (cwe CWE-89)",
+        "The parameterized query in src/routes/products.js is NOT reported as a confirmed SQL injection (it is either absent from validated_findings or appears only in false_positives)",
+        "A .security/report.md file was produced and is non-empty"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "threat-model-generation",
+      "prompt": "Generate a threat model for the order-service repository at evals/files/order-service. I don't need a vulnerability scan yet — just the threat model and config so we have a foundation for future reviews. Place the .security/ directory (with threat-model.md and config.json) into the provided outputs directory.",
+      "expected_output": "A STRIDE threat model document and config.json matching the skill's Phase 1 schema, covering all six STRIDE categories and the service's trust boundaries (Stripe, Postgres, JWT auth, file uploads).",
+      "files": ["evals/files/order-service"],
+      "expectations": [
+        "A .security/threat-model.md file was produced in the outputs directory and is non-empty",
+        "The threat model documents all six STRIDE categories: Spoofing, Tampering, Repudiation, Information Disclosure, Denial of Service, and Elevation of Privilege",
+        "A .security/config.json file was produced containing a severity_thresholds object and a vulnerability_patterns.enabled list",
+        "config.json contains a threat_model_version field",
+        "The threat model identifies at least one trust boundary or external dependency (e.g. Stripe, PostgreSQL, the payment or email integration, or file uploads)"
+      ]
+    }
+  ]
+}

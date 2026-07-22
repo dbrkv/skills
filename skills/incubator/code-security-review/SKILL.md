@@ -2,14 +2,27 @@
 name: code-security-review
 version: 1.0.0
 description: |
-  Review code changes for security vulnerabilities using STRIDE threat modeling.
-  Generates a codebase threat model, scans git changes across all STRIDE categories,
-  then validates findings for exploitability and filters false positives with CVSS
-  scoring and proof-of-concept generation. Use whenever the user asks for a security
-  review, vulnerability scan, threat model, or security audit of code changes —
-  including phrases like "is this secure", "scan for vulnerabilities", "security
-  check", "review this PR for security", or auditing a commit, branch, or staged
-  changes before merge.
+  Review code for security vulnerabilities using LLM reasoning and the STRIDE
+  threat-modeling methodology. Reads code directly, builds (or reuses) a STRIDE
+  threat model, scans the requested code across all six STRIDE categories, then
+  validates each finding for genuine exploitability and filters false positives
+  before reporting — with CVSS scoring and proof-of-concept generation.
+
+  Use this skill whenever the user wants a security assessment of CODE — trigger it
+  proactively even when they never say "skill" or "STRIDE". Triggers include:
+  - reviewing a PR, branch, commit, or commit range (e.g. "v2.3..v2.4", "last N
+    commits") for security before merging or releasing;
+  - scanning staged, uncommitted, or working-tree changes before a commit;
+  - answering "is this secure?", "scan for vulnerabilities", "security check",
+    "audit this code", or "is this snippet/function/file safe to ship?";
+  - generating or refreshing a threat model for a repository;
+  - checking whether changed or newly-added dependencies introduce known CVEs.
+
+  This skill PERFORMS reviews and GENERATES threat models. Do NOT trigger it to
+  merely EXPLAIN security concepts ("what is STRIDE", "explain spoofing vs
+  tampering"), to WRITE security docs/policies (SECURITY.md, disclosure policy),
+  to ADD tests, or to CONFIGURE security tooling/CI (Snyk, Dependabot, CodeQL) —
+  those are not code-change security reviews.
 user-invocable: true
 ---
 
