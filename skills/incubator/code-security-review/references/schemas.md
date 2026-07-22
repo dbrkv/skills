@@ -24,7 +24,7 @@ All artifacts live under `.security/` at the repository root.
 | `.security/validated-findings.json` | 3 | Confirmed findings + filtered false positives |
 | `.security/report.md` | 3 | Human-readable report |
 | `.security/acknowledged.json` | — | Dismissed findings (persists across runs) |
-| `.security/reports/report-{date}.md` | 3 | Dated report snapshots (optional) |
+| `.security/reports/report-{date}.md` | 3 | Dated carbon copy of `report.md`, one per run (history) |
 
 ## config.json
 
@@ -75,7 +75,7 @@ Written in Phase 2. Raw findings from the scan, before validation. Err on the si
       "stride_category": "Tampering",
       "vulnerability_type": "SQL Injection",
       "cwe": "CWE-89",
-      "file": "src/api/users.py",
+      "file": "src/api/users.js",
       "line_range": "45-49",
       "code_context": "<vulnerable code snippet>",
       "analysis": "<explanation of why this is vulnerable>",
@@ -116,6 +116,8 @@ Written in Phase 2. Raw findings from the scan, before validation. Err on the si
   }
 }
 ```
+
+**STRIDE category values.** Use these exact tokens for both the `stride_category` field and the `by_stride` summary keys, so the two always line up: `Spoofing`, `Tampering`, `Repudiation`, `InfoDisclosure`, `DoS`, `ElevationOfPrivilege`. The human-readable `report.md` may spell them out ("Information disclosure"); the JSON artifacts stay on these tokens.
 
 ## validated-findings.json
 
@@ -219,20 +221,32 @@ Dismissed findings. Persists across runs so a triaged finding stays suppressed o
 {
   "dismissed": [
     {
-      "id": "VULN-007",
       "file": "src/routes/admin.ts",
+      "cwe": "CWE-862",
       "vulnerability_type": "Missing Authorization",
+      "where": "the admin user-delete endpoint (DELETE /api/admin/users/:id)",
       "severity": "HIGH",
       "reason": "Accepted risk for internal admin tool",
-      "evidence": "Endpoint only reachable from internal network behind VPN",
+      "evidence": "Only reachable from the internal network behind VPN",
       "dismissed_by": "user",
-      "dismissed_date": "2025-01-10T14:20:00Z"
+      "dismissed_date": "2025-01-10T14:20:00Z",
+      "last_seen_id": "VULN-007"
     }
   ]
 }
 ```
 
-The `id` and/or `file` + `vulnerability_type` pair is used to match findings across runs. The `reason` and `evidence` fields explain why the finding was dismissed, so future reviews can revisit the decision.
+### Matching a dismissal to a finding
+
+A finding is suppressed only when **all four** of these match a dismissed entry: `file`, `cwe`, `vulnerability_type`, and `where`. Compare `where` loosely (trim whitespace, case-insensitive, ignore trailing punctuation) — it is a short human description of the spot (a route, handler, or function), not an exact coordinate.
+
+**Never match on the finding id.** `VULN-NNN` ids are assigned fresh on every scan — they are per-report sequence numbers, not stable identifiers — so the same id refers to different findings across runs. `last_seen_id` is stored only as a human breadcrumb (the id in the report where the finding was dismissed) and is never used for matching.
+
+**Fail open.** If `file` + `cwe` + `vulnerability_type` match but `where` does not, do **not** suppress — surface the finding and note that it resembles a dismissed one. This prevents a coarse match from silently hiding a *newly introduced* vulnerability of the same type in the same file (e.g. a second SQL injection added to a file where one was already accepted). When in doubt, show the finding.
+
+**Staleness.** If the code at `where` has materially changed since `dismissed_date`, do not silently re-apply the dismissal — surface the finding flagged as "dismissal may be stale, re-review," so an accepted risk can't quietly cover code that has since been rewritten.
+
+The `reason` and `evidence` fields explain why the finding was dismissed, so future reviews can revisit the decision.
 
 ## CWE reference
 

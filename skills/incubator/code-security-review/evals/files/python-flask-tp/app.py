@@ -43,8 +43,8 @@ def download():
 @app.route("/ping")
 def ping():
     host = request.args.get("host", "localhost")
-    # Ping the host the user asked about.
-    out = subprocess.check_output(["ping", "-c", "1", host], text=True)
+    # Ping the host the user asked about (shelling out so the flags are easy to tweak).
+    out = subprocess.check_output(f"ping -c 1 {host}", shell=True, text=True)
     return "<pre>" + out + "</pre>"
 
 
