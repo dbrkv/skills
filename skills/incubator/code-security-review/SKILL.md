@@ -30,7 +30,7 @@ user-invocable: true
 
 Review code for security vulnerabilities using LLM-powered reasoning and the STRIDE threat-modeling methodology. This skill reads code directly, builds (or reuses) a threat model for the repository, scans changes for vulnerabilities across all STRIDE categories, and validates each finding for real exploitability before reporting it.
 
-The review is a three-phase pipeline. The threat model produced in phase 1 is the persistent "brain" the later phases reason against; findings are recomputed fresh on every run so the same code always yields the same result.
+The review is a three-phase pipeline. The threat model produced in phase 1 is the persistent "brain" the later phases reason against; findings are recomputed fresh on every run, so results always reflect the current state of the code rather than a stale cache.
 
 ## When to use this skill
 
@@ -174,15 +174,15 @@ All security artifacts live under `.security/` at the repository root:
 ├── validated-findings.json  # Validated findings + false positives (Phase 3)
 ├── report.md                # Human-readable report (Phase 3)
 ├── acknowledged.json        # Dismissed findings (see below)
-└── reports/                 # Dated report snapshots (optional)
+└── reports/                 # Dated carbon copies of report.md (history)
     └── report-{YYYY-MM-DD}.md
 ```
 
-Add `.security/findings.json` and `.security/validated-findings.json` to `.gitignore` if you don't want per-run scratch files committed; keep `threat-model.md`, `config.json`, and `acknowledged.json` under version control so they persist across runs.
+**What to commit.** Keep `threat-model.md`, `config.json`, and `acknowledged.json` under version control — they carry state that must persist across runs. Treat `findings.json`, `validated-findings.json`, and `report.md` as per-run outputs, regenerated on every scan; add them to `.gitignore` unless you want them tracked. The dated snapshots under `reports/` are an optional history trail — commit them if you want a durable record, otherwise gitignore `reports/` as well.
 
 ## Dismissing findings
 
-When the user accepts a finding as a known risk or confirms it's a false positive, record it in `.security/acknowledged.json` so subsequent scans suppress it. Dismissals are keyed by finding id with a reason and evidence. See `references/schemas.md` for the format. The skill applies dismissals during Phase 3 — a dismissed finding is excluded from the report and noted in the validation output.
+When the user accepts a finding as a known risk or confirms it's a false positive, record it in `.security/acknowledged.json` so subsequent scans suppress it. A dismissal is keyed by `file` + `cwe` + `vulnerability_type` + a short `where` description of the spot — never the per-run `VULN-NNN` id, which is reassigned on every scan. Matching fails open: an uncertain match re-surfaces the finding rather than hiding it. See `references/schemas.md` for the format and the full matching rule. The skill applies dismissals during Phase 3 — a dismissed finding is excluded from the report and noted in the validation output.
 
 ## Severity as a blocking signal
 
