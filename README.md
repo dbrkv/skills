@@ -8,6 +8,21 @@ A skill is a focused bundle of instructions, references, and resources that an a
 
 Each skill is self-contained and follows a consistent contract so it can be discovered, loaded, and executed predictably by any compatible agent runtime.
 
+## Install
+
+Install skills with the [`skills`](https://github.com/vercel-labs/skills) CLI:
+
+```sh
+npx skills add dbrkv/skills
+```
+
+Install a specific skill, or to a specific agent:
+
+```sh
+npx skills add dbrkv/skills --skill code-security-review
+npx skills add dbrkv/skills -a claude-code -a kilo
+```
+
 ## Why skills?
 
 - **Precision over recall.** Instead of relying solely on pretrained knowledge, skills inject curated, authoritative context for a narrow domain.
