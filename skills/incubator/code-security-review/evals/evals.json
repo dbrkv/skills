@@ -9,13 +9,14 @@
       "files": ["evals/files/node-express-tp"],
       "expectations": [
         "A .security/validated-findings.json file was produced in the outputs directory",
-        "validated-findings.json is valid JSON with a top-level summary object containing confirmed, false_positives, and needs_manual_review integer fields",
+        "validated-findings.json is valid JSON with a top-level summary object containing confirmed, likely, false_positives, needs_manual_review, and dismissed integer fields",
         "The validated findings include a CONFIRMED SQL Injection finding (cwe CWE-89) located in src/routes/users.js",
         "The validated findings include a CONFIRMED finding for hardcoded credentials/secrets (cwe CWE-798) located in src/config.js",
         "The validated findings include a CONFIRMED stored XSS finding (cwe CWE-79) located in src/routes/notes.js",
         "Each confirmed finding includes a recommendation field and a validated_severity",
         "A .security/report.md file was produced and is non-empty",
-        "At least one of the high/critical findings includes a proof_of_concept with a payload"
+        "At least one of the high/critical findings includes a proof_of_concept with a payload",
+        "The summary counts reconcile with the arrays: confirmed + likely equals the number of entries in validated_findings; total_scanned equals confirmed + likely + false_positives + needs_manual_review + dismissed; and by_severity and by_stride each sum to confirmed + likely"
       ]
     },
     {
@@ -30,7 +31,8 @@
         "A CONFIRMED command injection finding (cwe CWE-78) for the /ping endpoint is present",
         "A CONFIRMED path traversal finding (cwe CWE-22) for the /download endpoint is present",
         "A CONFIRMED SSRF finding (cwe CWE-918) for the /preview endpoint is present",
-        "A .security/report.md file was produced and is non-empty"
+        "A .security/report.md file was produced and is non-empty",
+        "The summary counts reconcile with the arrays: confirmed + likely equals the number of entries in validated_findings; total_scanned equals confirmed + likely + false_positives + needs_manual_review + dismissed; and by_severity and by_stride each sum to confirmed + likely"
       ]
     },
     {
@@ -45,7 +47,8 @@
         "No finding marks the parameterized query in src/routes/products.js as a CONFIRMED SQL injection",
         "No finding marks src/routes/profile.js as a CONFIRMED XSS vulnerability (the manual escaping is a mitigation)",
         "Any suspicious patterns the scan raised appear in false_positives or needs_manual_review rather than as CONFIRMED",
-        "A .security/report.md file was produced and states that there are no confirmed findings"
+        "A .security/report.md file was produced and states that there are no confirmed findings",
+        "The summary counts reconcile with the arrays: confirmed + likely equals the number of entries in validated_findings; total_scanned equals confirmed + likely + false_positives + needs_manual_review + dismissed; and by_severity and by_stride each sum to confirmed + likely"
       ]
     },
     {
@@ -59,7 +62,8 @@
         "validated-findings.json is valid JSON",
         "The SQL injection in src/routes/admin_users.js is CONFIRMED (cwe CWE-89)",
         "The parameterized query in src/routes/products.js is NOT reported as a confirmed SQL injection (it is either absent from validated_findings or appears only in false_positives)",
-        "A .security/report.md file was produced and is non-empty"
+        "A .security/report.md file was produced and is non-empty",
+        "The summary counts reconcile with the arrays: confirmed + likely equals the number of entries in validated_findings; total_scanned equals confirmed + likely + false_positives + needs_manual_review + dismissed; and by_severity and by_stride each sum to confirmed + likely"
       ]
     },
     {

@@ -122,7 +122,7 @@ If no scope is specified, ask the user to clarify.
 Try to read `.security/threat-model.md` and `.security/config.json`.
 
 - **If they exist** and are reasonably recent, proceed to Phase 2.
-- **If either is missing**, tell the user the threat model doesn't exist yet and you'll generate it first, then run Phase 1. Do this automatically as part of the workflow — don't ask the user to do it separately.
+- **If either is missing**, tell the user the threat model doesn't exist yet and you'll generate it first, then proceed to Phase 2. Do this automatically as part of the workflow — don't ask the user to do it separately.
 
 **Read `references/threat-modeling.md` and follow it** to analyze the repository and write `.security/threat-model.md` and `.security/config.json`. That reference contains the full analysis steps, the STRIDE template, and the config schema.
 
@@ -204,6 +204,7 @@ The review is complete when:
 - [ ] Dependencies scanned for CVEs
 - [ ] Findings validated for exploitability
 - [ ] False positives filtered
+- [ ] Summary counts derived from the finding arrays and reconciled (see `schemas.md` invariants)
 - [ ] `.security/validated-findings.json` and `.security/report.md` produced
 - [ ] Results presented to the user
 
