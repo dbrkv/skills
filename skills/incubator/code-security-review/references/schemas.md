@@ -177,6 +177,18 @@ Written in Phase 3. The source-of-truth output: confirmed findings with full exp
       "reason": "Complex data flow through message queue. Unable to fully trace if sanitization occurs in consumer service."
     }
   ],
+  "dismissed_findings": [
+    {
+      "id": "VULN-010",
+      "matched_dismissal": {
+        "file": "src/routes/admin.ts",
+        "cwe": "CWE-862",
+        "vulnerability_type": "Missing Authorization"
+      },
+      "reason": "Accepted risk for internal admin tool",
+      "evidence": "Only reachable from the internal network behind VPN"
+    }
+  ],
   "dependency_findings": [
     {
       "id": "DEP-001",
@@ -192,9 +204,11 @@ Written in Phase 3. The source-of-truth output: confirmed findings with full exp
   ],
   "summary": {
     "total_scanned": 8,
-    "confirmed": 5,
-    "false_positives": 3,
+    "confirmed": 4,
+    "likely": 1,
+    "false_positives": 2,
     "needs_manual_review": 1,
+    "dismissed": 0,
     "by_severity": {
       "CRITICAL": 1,
       "HIGH": 2,
@@ -212,6 +226,29 @@ Written in Phase 3. The source-of-truth output: confirmed findings with full exp
   }
 }
 ```
+
+### Summary counts are derived, not authored
+
+Every number in the `summary` block is a function of the arrays above it — never independently guessed or typed by hand. Compute each one by counting entries in the arrays. This is what keeps the summary consistent with the actual findings a reviewer will open and read; an authored count that disagrees with its array is the single most common output defect.
+
+- `confirmed` = number of entries in `validated_findings` whose `status` is `"CONFIRMED"`
+- `likely` = number of entries in `validated_findings` whose `status` is `"LIKELY"`
+- `false_positives` = `length(false_positives)`
+- `needs_manual_review` = `length(needs_manual_review)`
+- `dismissed` = `length(dismissed_findings)` — findings suppressed via `acknowledged.json`
+- `total_scanned` = `confirmed + likely + false_positives + needs_manual_review + dismissed` — the full set of Phase 2 findings processed in Phase 3
+- `by_severity` and `by_stride` = counts over `validated_findings` only (the CONFIRMED + LIKELY set), so each must sum to `confirmed + likely`
+
+**Where each status lives.** `validated_findings` holds exactly the findings worth acting on — statuses `CONFIRMED` and `LIKELY` only. `FALSE_POSITIVE` findings go in `false_positives`; `NEEDS_MANUAL_REVIEW` findings go in `needs_manual_review`; findings matched by `acknowledged.json` go in `dismissed_findings`. Never place any other status inside `validated_findings`, and never drop a finding without putting it in one of these four arrays.
+
+**Invariants the output must satisfy.** These must all hold before writing the file; if any fails, recount — do not adjust a single number to force agreement.
+
+1. `total_scanned == confirmed + likely + false_positives + needs_manual_review + dismissed`
+2. `confirmed + likely == length(validated_findings)`
+3. `sum(by_severity.values) == confirmed + likely`
+4. `sum(by_stride.values) == confirmed + likely`
+
+The verification step in `vulnerability-validation.md` checks these with `jq`; run it.
 
 ## acknowledged.json
 
