@@ -1,29 +1,27 @@
 ---
 name: code-security-review
-version: 1.0.0
 description: |
   Review code for security vulnerabilities using LLM reasoning and the STRIDE
-  threat-modeling methodology. Reads code directly, builds (or reuses) a STRIDE
-  threat model, scans the requested code across all six STRIDE categories, then
-  validates each finding for genuine exploitability and filters false positives
-  before reporting — with CVSS scoring and proof-of-concept generation.
+  threat-modeling methodology: builds (or reuses) a STRIDE threat model, scans
+  the code across all six STRIDE categories, validates findings for
+  exploitability, filters false positives, then reports with CVSS scores and
+  proof-of-concept generation.
 
-  Use this skill whenever the user wants a security assessment of CODE — trigger it
-  proactively even when they never say "skill" or "STRIDE". Triggers include:
-  - reviewing a PR, branch, commit, or commit range (e.g. "v2.3..v2.4", "last N
-    commits") for security before merging or releasing;
+  Use whenever the user wants a security assessment of CODE — trigger proactively
+  even if they never say "skill" or "STRIDE". Triggers include:
+  - reviewing a PR, branch, commit, or commit range for security before merging;
   - scanning staged, uncommitted, or working-tree changes before a commit;
-  - answering "is this secure?", "scan for vulnerabilities", "security check",
-    "audit this code", or "is this snippet/function/file safe to ship?";
-  - generating or refreshing a threat model for a repository;
-  - checking whether changed or newly-added dependencies introduce known CVEs.
+  - "is this secure?", "scan for vulnerabilities", "audit this code", "safe to
+    ship?";
+  - generating or refreshing a repository threat model;
+  - checking whether changed dependencies introduce known CVEs.
 
-  This skill PERFORMS reviews and GENERATES threat models. Do NOT trigger it to
-  merely EXPLAIN security concepts ("what is STRIDE", "explain spoofing vs
-  tampering"), to WRITE security docs/policies (SECURITY.md, disclosure policy),
-  to ADD tests, or to CONFIGURE security tooling/CI (Snyk, Dependabot, CodeQL) —
-  those are not code-change security reviews.
-user-invocable: true
+  Do NOT trigger to merely EXPLAIN concepts ("what is STRIDE"), WRITE security
+  docs (SECURITY.md, disclosure policy), ADD tests, or CONFIGURE tooling/CI
+  (Snyk, Dependabot, CodeQL).
+metadata:
+  version: "1.0.0"
+  user-invocable: "true"
 ---
 
 # Code security review

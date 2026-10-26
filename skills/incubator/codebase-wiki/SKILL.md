@@ -1,12 +1,15 @@
 ---
 name: codebase-wiki
-version: 1.0.0
 description: |
   Generate comprehensive codebase documentation for a repository.
   Produces a structured markdown wiki directory that can be read by any
-  markdown viewer or static site generator.
-user-invocable: true
-disable-model-invocation: true
+  markdown viewer or static site generator. Use when the user asks to
+  document a codebase, build a wiki or docs site for it, or explain how
+  a repository is organized and how its parts fit together.
+metadata:
+  version: "1.0.0"
+  user-invocable: "true"
+  disable-model-invocation: "true"
 ---
 
 # Codebase wiki
