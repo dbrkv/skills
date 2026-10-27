@@ -70,7 +70,7 @@ Classify data by sensitivity.
 
 ## Step 4: Apply STRIDE analysis
 
-For each major component, analyze threats in all six categories. For each identified threat: describe the attack scenario, list vulnerable components, show code patterns to look for, note existing mitigations, identify gaps, and assign severity (CRITICAL/HIGH/MEDIUM/LOW) and likelihood.
+For each major component, analyze threats in all six categories. Each threat gets a stable id **`TH-NNN`** (one sequential series across the whole document), the catalog classes it belongs to (from `references/threat-catalog.md`), and the components it applies to. For each identified threat: describe the attack scenario, list vulnerable components, show code patterns to look for, note existing mitigations, identify gaps, and assign severity (CRITICAL/HIGH/MEDIUM/LOW) and likelihood.
 
 #### S - Spoofing
 
@@ -119,6 +119,13 @@ Use the [template below](#threat-model-document-template) to generate a comprehe
 
 The document should be written in natural language with code examples, optimized for LLM comprehension.
 
+The threat model must also carry the two structures downstream phases slice deterministically:
+
+- a **Components table** — `| ID | Component | Paths (glob) | Trust boundaries | Threats |` — mapping every significant code area to glob paths, boundary types, and its `TH-NNN` threats;
+- **`TH-NNN` ids on every threat** with its catalog classes and components, so detectors can be handed exactly the threats that apply to their files and classes.
+
+**Deterministic slicing rule** (used by detection): for a set of files and a detector's classes, the slice is — files → components whose `Paths (glob)` matches → those components' threats filtered to the classes. A file matched by no component yields an **empty slice**: detection proceeds with the catalog and trust rules alone, and the report marks the file's findings "component not modeled". **In PR-mode scans the threat model is never edited automatically** — model gaps are reported as suggestions only.
+
 ### `.security/config.json`
 
 ```json
@@ -143,11 +150,16 @@ The document should be written in natural language with code examples, optimized
       "idor"
     ],
     "custom_patterns_path": null
+  },
+  "cvss_version": "3.1",
+  "validation": {
+    "max_findings": 15,
+    "allow_poc_execution": false
   }
 }
 ```
 
-Customize based on detected compliance requirements (from docs, configs, or user input), security team contacts (if provided), and tech stack (enable relevant vulnerability patterns).
+Customize based on detected compliance requirements (from docs, configs, or user input), security team contacts (if provided), and tech stack (enable relevant vulnerability patterns). `cvss_version`, `validation`, and `catalog` are optional and default to the values shown (CVSS 3.1, validation budget 15, PoC execution off, no disabled classes) — include them only when the user asks for different values.
 
 ## Threat model document template
 
@@ -183,6 +195,14 @@ This is a {type of application} that allows users to {primary functions}. The sy
 When a user {action}, the system {process}. This involves {data flow description}. The data is validated at {points} and authenticated using {mechanism}.
 
 ---
+
+## Components
+
+| ID | Component | Paths (glob) | Trust boundaries | Threats |
+|---|---|---|---|---|
+| {C-ID} | {Component name} | {glob, e.g. src/routes/admin*.js} | {boundary types from the scout's vocabulary} | {TH-NNN list} |
+
+(One row per significant component; together the globs should cover the codebase's attack-relevant files. Files matched by no glob are "not modeled" and get an empty detection slice.)
 
 ## 2. Trust Boundaries & Security Zones
 
@@ -257,6 +277,15 @@ The system accepts user input from:
 
 For each category below, document: the threat scenario, vulnerable components, the attack vector as numbered steps, the code pattern to look for (vulnerable + safe), existing mitigations, gaps, severity, and likelihood.
 
+Each threat entry starts with its id and wiring:
+
+```markdown
+**TH-{NNN} — {short title}**
+- Classes: {catalog class ids, e.g. SESSION, AUTHN}
+- Components: {component ids from the Components table}
+```
+followed by the scenario, attack vector, patterns, mitigations, gaps, severity, and likelihood.
+
 ### S - Spoofing Identity
 An attacker pretends to be someone or something they're not to gain unauthorized access.
 
@@ -291,7 +320,7 @@ Gaining higher privileges than intended.
 
 ## 6. Vulnerability Pattern Library
 
-This section contains code patterns that indicate vulnerabilities. When analyzing code: look for these patterns, consider the context (is input sanitized earlier?), check if mitigations are in place, and cross-reference with the STRIDE threats above.
+This section contains **repository-specific** patterns only — the project's own helpers, wrappers, and conventions (e.g. its custom `db.query()` wrapper, its homegrown `escape()` helper). The general vulnerability-pattern knowledge lives in `references/threat-catalog.md` and is not duplicated here. When analyzing code: look for these repo-specific patterns, consider the context (is input sanitized earlier?), check if mitigations are in place, and cross-reference the `TH-NNN` threats above.
 
 ### SQL Injection Patterns
 ```{language}
@@ -361,7 +390,7 @@ Manual security reviews are required for HIGH/CRITICAL findings, new authenticat
 
 ### LLM optimization tips
 
-For maximum effectiveness with downstream scan and validation phases: use explicit code patterns (LLMs match patterns better than prose), write attack vectors as numbered steps, use consistent headings for targeted retrieval, and cross-reference threats to specific code locations when known.
+For maximum effectiveness with downstream scan and validation phases: use explicit code patterns (LLMs match patterns better than prose), write attack vectors as numbered steps, use consistent headings for targeted retrieval, and cross-reference threats to specific code locations when known. Give every threat its `TH-NNN` id and keep the Components globs current — detector slices are built from them mechanically, so a stale glob silently narrows what detectors are told to look for.
 
 ## Success criteria
 
@@ -389,6 +418,8 @@ jq . .security/config.json > /dev/null && echo "OK Config is valid JSON"
 grep -q "## 1. System Overview" .security/threat-model.md && echo "OK Has System Overview"
 grep -q "## 5. Threat Analysis" .security/threat-model.md && echo "OK Has Threat Analysis"
 grep -q "## 6. Vulnerability Pattern Library" .security/threat-model.md && echo "OK Has Pattern Library"
+grep -q "## Components" .security/threat-model.md && echo "OK Has Components table"
+grep -qE "TH-[0-9]+" .security/threat-model.md && echo "OK Threat IDs present"
 ```
 
 ## External references

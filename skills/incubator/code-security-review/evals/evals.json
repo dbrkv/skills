@@ -75,9 +75,65 @@
       "expectations": [
         "A .security/threat-model.md file was produced in the outputs directory and is non-empty",
         "The threat model documents all six STRIDE categories: Spoofing, Tampering, Repudiation, Information Disclosure, Denial of Service, and Elevation of Privilege",
+        "The threat model contains a Components table with path globs mapping components to files",
+        "Threats carry TH-NNN identifiers wired to catalog classes and components",
         "A .security/config.json file was produced containing a severity_thresholds object and a vulnerability_patterns.enabled list",
         "config.json contains a threat_model_version field",
         "The threat model identifies at least one trust boundary or external dependency (e.g. Stripe, PostgreSQL, the payment or email integration, or file uploads)"
+      ]
+    },
+    {
+      "id": 6,
+      "name": "header-at-proxy",
+      "prompt": "Run a security review of the notes service at evals/files/header-proxy. Heads up: in production it runs behind nginx, but the nginx config is not part of this repo. Produce the skill's standard .security/ artifacts and place the .security/ directory into the provided outputs directory.",
+      "expected_output": "No CONFIRMED security-headers finding (the control may live at the proxy, outside the repo): the observation lands in hardening_notes, or at worst in needs_manual_review with a missing_fact naming the external proxy configuration. Everything else in the fixture is clean.",
+      "files": ["evals/files/header-proxy"],
+      "expectations": [
+        "A .security/validated-findings.json file was produced in the outputs directory and is valid JSON",
+        "No CONFIRMED finding for missing security headers (no confirmed finding whose cwe is CWE-1021 or whose type mentions headers)",
+        "The security-headers observation is handled honestly: a hardening note mentioning headers exists, or a needs_manual_review entry with reason_code missing_fact whose missing_fact names the proxy/headers",
+        "summary.hardening equals the number of entries in hardening_notes",
+        "A .security/report.md was produced, is non-empty, and renders the hardening notes in their own section when any exist"
+      ]
+    },
+    {
+      "id": 7,
+      "name": "rerun-lifecycle",
+      "prompt": "Multi-stage lifecycle test of the findings ledger on a git repository built from evals/files/ledger-app: stage 1 (initial full scan on the default branch with a clean tree — read-write) opens entries; stage 2 (re-run with no source change) carries verdicts without re-validation; stage 3 (fix commit) transitions the entry to fixed; stage 4 (revert of the fix) regresses it back to open. Stage ledger snapshots are copied to outputs as stage{1..4}-ledger.json.",
+      "expected_output": "findings-ledger.json history shows opened -> carried -> fixed -> regressed for the vulnerable entry; stage 2 ran no validators for the carried finding; fixed only after a scan with covered D2 units.",
+      "files": ["evals/files/ledger-app"],
+      "expectations": [
+        "stage1-ledger.json: the vulnerable entry is open with history event opened",
+        "stage2-ledger.json: same keys, still open, history gained a carried event (verdict carried, not re-validated)",
+        "stage3-ledger.json: the entry is fixed with a fixed record and a fixed history event",
+        "stage4-ledger.json: the entry is open again with a regressed history event",
+        "The final run's standard .security/ artifacts exist in the outputs directory"
+      ]
+    },
+    {
+      "id": 8,
+      "name": "fixed-requires-coverage",
+      "prompt": "Ledger honesty test: after the vulnerable code is removed but the D2 detector is force-failed via the config debug hook (debug.fail_detectors: [\"D2\"]), the ledger entry must stay open — 'not found because the detector died' must never become 'fixed'. Stage 1 (initial full scan) opens the entry; stage 2 (fix commit + fail_detectors hook) must leave it open with D2 units skipped and the report partial.",
+      "expected_output": "stage2 ledger entry still open (not fixed); D2 coverage units skipped with a forced-failure reason; report declares a partial run.",
+      "files": ["evals/files/ledger-app"],
+      "expectations": [
+        "stage1-ledger.json: the vulnerable entry is open",
+        "stage2-ledger.json: the entry is still open (not fixed) despite the vulnerable code being gone",
+        "stage2 findings.json: every D2 coverage unit is skipped with a reason mentioning fail_detectors",
+        "stage2 report.md calls the run partial"
+      ]
+    },
+    {
+      "id": 9,
+      "name": "pr-read-only",
+      "prompt": "Read-only mode test: a full scan on the default branch creates the ledger; a subsequent branch scan (feature branch adding a new vulnerable file plus a comment change in the vulnerable admin file) must not modify findings-ledger.json (byte-identical) while the report marks findings as new/known.",
+      "expected_output": "branch run has ledger_mode read-only; findings-ledger.json byte-identical before and after the branch run; report contains new/known marks.",
+      "files": ["evals/files/ledger-app"],
+      "expectations": [
+        "The branch run's scan_meta.ledger_mode is read-only",
+        "findings-ledger.json is byte-identical after the branch run (compare with the committed main-run snapshot)",
+        "The branch report marks the new finding as new",
+        "The branch report marks the previously-seen finding as known (or its validated entry carries a non-null ledger key)"
       ]
     }
   ]
