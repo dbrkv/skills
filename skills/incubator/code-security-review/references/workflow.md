@@ -40,10 +40,17 @@ subagent, never skipped. More Claude Code Workflow specifics to respect
 when translating: the script cannot read files — prompts carry **paths**
 (skill references, snapshot files) and the agents read them themselves;
 there is no wall-clock access (`Date.now()` is unavailable) — the date and
-run id arrive via `args` and travel back in results; and roughly 16 agents
-run concurrently — slice larger fan-outs (every scout wave, the
-verification pipeline) into batches of ≤16 and treat the batch boundary as
-a barrier.
+run id arrive via `args` and travel back in results; the snapshot inputs
+the script needs as data (open findings, rejected records to carry, the
+known-findings list, next ids) arrive via `args` too, read by the parent
+before the launch; and roughly 16 agents run concurrently — excess calls
+queue automatically, so never slice fan-outs into manual batches (a batch
+boundary is a needless barrier that stalls the verification pipeline).
+Because the script cannot run the validator, the §5 gate and its repair
+loop run in the parent **after the workflow returns**: the script returns
+the assembled findings.json and coverage.json content, the parent writes
+them, validates, and launches the repair agent itself (a subagent) when
+the validator fails.
 
 ## 2. Nodes
 
@@ -300,7 +307,8 @@ mode:
 2. Not OK → errors on the findings side go to the N9 **repair agent**
    (fix record shape and the summary; verdicts untouched); errors on the
    coverage side (execution, degradation lists) the parent fixes itself —
-   coverage.json is its file. Re-validate. **At most 2 repair attempts.**
+   coverage.json is its file. Re-validate after each repair. **At most 2 repair
+   attempts** — 3 validator runs in all; the last one decides.
 3. Still not OK → the snapshot is **not ready**: no OK, no issued report.
    REPORT.md (or the chat answer) says so directly, quoting the remaining
    validator errors, and nothing is claimed as a saved snapshot.
@@ -401,10 +409,14 @@ run audit (BUDGET = ceil(1.2 × estimate), MAX_WAVES=3):
   doc = parent: assemble findings.json (merges, verbatim rejected, counted summary)  # N9
   parent: write findings.json + coverage.json (execution:"workflow", degradation, gaps)
           BEFORE the first validator run                       # coverage checks sit in the repair loop
-  for attempt in 1..2:                                         # §5 gate
-      if parent-runs validate_findings.py == OK: break
-      doc = agent(repair, doc + validator errors); parent: rewrite findings.json
-  else: report "snapshot not ready" with errors; stop          # no OK, no report
+  # §5 gate — no exec in the script (Claude Code)? this block runs in the
+  # parent after the workflow returns, the repair agent as a subagent
+  ok = parent-runs validate_findings.py                        # check 1
+  repairs = 0
+  while not ok and repairs < 2:                                # ≤2 repairs, ≤3 checks
+      doc = agent(repair, doc + validator errors); repairs += 1
+      parent: rewrite findings.json; ok = parent-runs validate_findings.py
+  if not ok: report "snapshot not ready" with errors; stop     # no OK, no report
   parent: write threat-model.md + REPORT.md (header: execution mode)
   fixes = agent(reviewer, REPORT + findings)                   # N10, downgrade-only
   parent: apply fixes; re-validate; issue report
