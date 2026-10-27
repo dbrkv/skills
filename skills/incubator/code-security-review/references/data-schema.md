@@ -151,7 +151,9 @@ and is not duplicated here. The branches:
   `existing_mitigations`, `exploitation_path`) come only from a verdict. A
   needs_review record no verifier produced (`not_validated`,
   `validator_output_invalid`) carries none of them — no defaults are
-  filled in.
+  filled in. Its `evidence` (required on every finding) is the candidate's
+  own location: `{file, line: first line of line_range, note: the scout's
+  analysis}` — a pointer for the next run, not a verdict.
 - `validated_in_context: true` marks a record whose verdict was produced in
   the orchestrator's context (linear mode, or a medium/low finding verified
   in-context after its verifier launch failed twice) instead of by an

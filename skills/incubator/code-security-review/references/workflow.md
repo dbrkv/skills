@@ -129,6 +129,9 @@ response. "Receives" is exhaustive — anything not listed is not sent.
 - **Board ids.** The parent mints `<unit>-c<N>` with one counter per unit
   **for the whole run** — a unit re-scouted in a later wave continues its
   numbering, never restarts it.
+- **Re-scouting adds, never replaces.** A reassigned unit's new checks are
+  appended to the ones it already has, and its status never drops below
+  `candidate` while board candidates from an earlier wave belong to it.
 - **Instances.** ⌈units / 6⌉ per wave (groups keep related units together —
   one subsystem per scout when possible).
 - **Failure.** Invalid response → re-run once with a fresh scout; second
@@ -343,7 +346,10 @@ fan-out:
   and a deferred unit makes the run **incomplete**: coverage with deferred
   units is never clean.
 - **Verifier cap**: at most 20 verifiers per run, and never more than the
-  validation allowance left after the waves. Second verifiers outrank extra
+  validation allowance left after the waves. Once the waves are over, that
+  allowance is **everything left**: `B − used − tail reserve` — the 30%
+  validation reserve is the floor protected during the waves, not a ceiling
+  on verification. Second verifiers outrank extra
   first verifications, so admit root causes in queue order while
   `admitted + high/critical among them (one N8 slot each) ≤ allowance`, up
   to 20. Leftover root causes → `needs_review` / `not_validated` (a budget
@@ -409,7 +415,11 @@ before launching the run (the procedure is §9):
 5. **Nothing is dropped silently.** Every cut — deferred units, capped
    verifications, dropped invalid responses — lands in the log **and** in
    `coverage.json` (gaps, `not_validated`, blocked reasons).
-6. **A failed or empty agent response is a degradation, not a skip.** The
+6. **A failed or empty agent response is a degradation, not a skip** — and
+   never a crash: every agent call, the repair, writer, and reviewer calls
+   included, has a failure path (a failed repair is a spent round; an
+   exhausted budget is a call not made). An unhandled failure must not abort
+   the run after snapshot files are written. The
    affected phase token or finding id goes to `coverage.json.degradation`,
    and the affected verdict follows the linear-mode rules
    (`references/verification.md`) for that finding alone. The run also
