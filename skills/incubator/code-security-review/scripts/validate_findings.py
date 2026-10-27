@@ -232,22 +232,57 @@ def validate_board(board_path: Path, data: dict) -> list:
     return errs
 
 
+def validate_prev(prev_path: Path, data: dict) -> list:
+    """Rejected records carried without re-verify (same verdict_date as the
+    base snapshot) must match the base record byte-for-byte."""
+    errs = []
+    prev_file = prev_path / "findings.json" if prev_path.is_dir() else Path(prev_path)
+    try:
+        prev = json.loads(prev_file.read_text())
+    except (json.JSONDecodeError, OSError) as e:
+        return [f"--prev {prev_path}: unreadable ({e})"]
+    if not isinstance(prev, dict):
+        return [f"--prev {prev_path}: not a snapshot"]
+    prev_rej = {r.get("id"): r for r in prev.get("rejected", [])}
+    for rec in data.get("rejected", []):
+        rid = rec.get("id")
+        base = prev_rej.get(rid)
+        if base is None:
+            continue                      # fresh rejection this run
+        if rec.get("verdict_date") != base.get("verdict_date"):
+            continue                      # re-verified this run: may differ
+        if json.dumps(rec, sort_keys=True) != json.dumps(base, sort_keys=True):
+            errs.append(f"rejected {rid}: carried without re-verify (same verdict_date) "
+                        "but differs from the base snapshot record")
+    return errs
+
+
 def main(argv):
     board = None
+    prev = None
     rest = []
     i = 1
     while i < len(argv):
         if argv[i] == "--board":
             if i + 1 >= len(argv):
-                print("usage: validate_findings.py PATH [--board candidates.jsonl]", file=sys.stderr)
+                print("usage: validate_findings.py PATH [--board candidates.jsonl] [--prev RUN-DIR]",
+                      file=sys.stderr)
                 return 2
             board = Path(argv[i + 1])
+            i += 2
+        elif argv[i] == "--prev":
+            if i + 1 >= len(argv):
+                print("usage: validate_findings.py PATH [--board candidates.jsonl] [--prev RUN-DIR]",
+                      file=sys.stderr)
+                return 2
+            prev = Path(argv[i + 1])
             i += 2
         else:
             rest.append(argv[i])
             i += 1
     if len(rest) != 1:
-        print("usage: validate_findings.py PATH [--board candidates.jsonl]", file=sys.stderr)
+        print("usage: validate_findings.py PATH [--board candidates.jsonl] [--prev RUN-DIR]",
+              file=sys.stderr)
         return 2
     path = Path(rest[0])
     try:
@@ -258,6 +293,8 @@ def main(argv):
     errs = validate(data, path)
     if board is not None:
         errs += validate_board(board, data)
+    if prev is not None:
+        errs += validate_prev(prev, data)
     if errs:
         for e in errs:
             print(f"ERROR: {e}")

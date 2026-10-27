@@ -212,4 +212,8 @@ or `by_severity` does not sum to confirmed + likely. With `--board
 candidates.jsonl`, it additionally fails when any board candidate id is not
 accounted for in a finding's or rejected record's `merged_from` or a
 suppressed entry's `candidates` — no candidate may vanish between the board
-and the snapshot.
+and the snapshot. With `--prev <run-dir>` (the base snapshot of a recheck, or
+the previous run of a full run), it additionally fails when a rejected record
+carried without re-verify — the same `verdict_date` as the base — differs
+from the base record in any field; a record re-verified this run (new
+`verdict_date`) may differ freely.

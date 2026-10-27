@@ -625,5 +625,54 @@ class BoardAccountingTests(unittest.TestCase):
         self.assertIn("u2-c1 is not accounted", r.stdout)
 
 
+class PrevCarryTests(unittest.TestCase):
+    """--prev: rejected carried without re-verify must match the base record."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+        self.addCleanup(self.tmp.cleanup)
+
+    def write_snapshot(self, name, doc):
+        run = self.base / name
+        run.mkdir(parents=True, exist_ok=True)
+        path = run / "findings.json"
+        path.write_text(json.dumps(doc))
+        return path
+
+    def test_carried_rejected_byte_identical(self):
+        prev = self.write_snapshot("prev", snapshot_doc(run_id="2026-10-26-1",
+                                                        rej=[rejected(verdict_date="2026-10-20")]))
+        cur = self.write_snapshot("cur", snapshot_doc(run_id="2026-10-27-1",
+                                                      rej=[rejected(verdict_date="2026-10-20")]))
+        self.assertEqual(validate_findings.validate_prev(self.base / "prev",
+                                                         json.loads(cur.read_text())), [])
+
+    def test_carried_rejected_drift_fails(self):
+        self.write_snapshot("prev", snapshot_doc(run_id="2026-10-26-1",
+                                                 rej=[rejected(verdict_date="2026-10-20")]))
+        drifted = rejected(verdict_date="2026-10-20",
+                           reason="reworded reason, same verdict_date")
+        cur = self.write_snapshot("cur", snapshot_doc(run_id="2026-10-27-1", rej=[drifted]))
+        errs = validate_findings.validate_prev(self.base / "prev", json.loads(cur.read_text()))
+        self.assertEqual(len(errs), 1)
+        self.assertIn("F-0002", errs[0])
+        self.assertIn("byte-for-byte" if "byte-for-byte" in errs[0] else "differs from the base", errs[0])
+
+    def test_rerejected_may_differ(self):
+        self.write_snapshot("prev", snapshot_doc(run_id="2026-10-26-1",
+                                                 rej=[rejected(verdict_date="2026-10-20")]))
+        fresh = rejected(verdict_date="2026-10-27", reason="re-verified after trace change")
+        cur = self.write_snapshot("cur", snapshot_doc(run_id="2026-10-27-1", rej=[fresh]))
+        self.assertEqual(validate_findings.validate_prev(self.base / "prev",
+                                                         json.loads(cur.read_text())), [])
+
+    def test_unreadable_prev_fails(self):
+        cur = self.write_snapshot("cur", snapshot_doc(run_id="2026-10-27-1"))
+        errs = validate_findings.validate_prev(self.base / "missing", json.loads(cur.read_text()))
+        self.assertEqual(len(errs), 1)
+        self.assertIn("unreadable", errs[0])
+
+
 if __name__ == "__main__":
     unittest.main()
