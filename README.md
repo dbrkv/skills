@@ -1,45 +1,65 @@
-# Agent Skills
+# skills
 
-A collection of reusable agent skills designed to extend AI coding assistants with specialized, on-demand knowledge and workflows.
+Personal, opinionated agent skills. Experimental.
 
-## What is a skill?
+These are skills I build for my own work and run on my own projects. They
+encode how I want an agent to do a job, not a neutral best practice, and
+they change as I learn what works. Everything is in the **incubator**:
+no stability promise, formats and behavior may change between commits. If
+you use one, pin a commit.
 
-A skill is a focused bundle of instructions, references, and resources that an agent loads when a task matches a specific domain. Skills bias an agent toward accurate, up-to-date practices for a particular area of work — for example, a framework, a platform, a tooling ecosystem, or a repeatable workflow.
+## Skills
 
-Each skill is self-contained and follows a consistent contract so it can be discovered, loaded, and executed predictably by any compatible agent runtime.
+| Skill | What it does |
+|-------|--------------|
+| [code-security-review](skills/incubator/code-security-review/) | Security review of code by source-level reasoning: STRIDE threat model, invariant-driven scouts, refute-first isolated verifiers, run snapshots under `~/security-audit/` that carry findings between sessions. Quick (diff, answer in chat), full audit, and recheck modes; runs via subagents, a harness workflow, or linearly. |
+| [codebase-wiki](skills/incubator/codebase-wiki/) | Reads a repository and writes a `wiki/` of interconnected markdown pages explaining what the code does and how it fits together. |
+
+## Opinions
+
+What these skills assume, on purpose:
+
+- **Verify before claiming.** A finding, a fact, or a "done" is backed by
+  something checkable: a source trace, a script's output, a validator's OK.
+- **Deterministic work goes to scripts.** IDs, storage paths, schema checks,
+  and counting live in small stdlib-only scripts, not in the model's memory.
+- **Leave the target alone.** A skill does not write artifacts into the
+  repository it works on unless that output is the point (like a wiki).
+- **Harness-neutral.** Written for any agent that loads skills (Claude Code,
+  ZCode, Kilo, ...). Harness features such as subagents or workflows are used
+  when present, with a stated fallback when not.
+- **Not a replacement for CI.** Scanners, linters, and dependency checks
+  belong in CI; skills cover what needs reasoning.
 
 ## Install
 
-Install skills with the [`skills`](https://github.com/vercel-labs/skills) CLI:
+With the [`skills`](https://github.com/vercel-labs/skills) CLI:
 
 ```sh
-npx skills add dbrkv/skills
+npx skills add dbrkv/skills                              # all skills
+npx skills add dbrkv/skills --skill code-security-review # one skill
+npx skills add dbrkv/skills -a claude-code -a kilo       # specific agents
 ```
 
-Install a specific skill, or to a specific agent:
+## Layout
 
-```sh
-npx skills add dbrkv/skills --skill code-security-review
-npx skills add dbrkv/skills -a claude-code -a kilo
+```
+skills/
+  incubator/   drafts and skills under active iteration (everything, for now)
+  active/      stable: tight trigger, exercised on real tasks
+  archived/    retired, kept for reference
+evals/         eval prompts, fixtures, and script tests per skill —
+               kept outside the skill folders so they are not installed
 ```
 
-## Why skills?
+Lifecycle rules are in [skills/README.md](skills/README.md).
 
-- **Precision over recall.** Instead of relying solely on pretrained knowledge, skills inject curated, authoritative context for a narrow domain.
-- **Consistency.** Encoded workflows ensure the agent follows the same proven steps every time.
-- **Portability.** A well-formed skill can be shared, versioned, and reused across projects and teams.
-- **Extensibility.** New capabilities can be added without modifying the core agent — just drop in a new skill.
+## Credits
 
-## Contributing
-
-Contributions are welcome. A good skill:
-
-- Has a clear, specific trigger description so it activates only when relevant.
-- Biases toward retrieval from authoritative sources (official docs, specs) over pretrained knowledge.
-- Is scoped tightly — one coherent capability per skill.
-- Includes examples, references, and any scripts or templates needed to execute the workflow.
-- Follows the project's naming and layout conventions.
+Some skills adapt material from other open-source skills; each such skill
+carries a `NOTICE.md` with the source and its license.
 
 ## License
 
-See the repository for license details.
+No license has been chosen for this repository yet. Third-party material
+keeps its own license, stated in the skill's `NOTICE.md`.
