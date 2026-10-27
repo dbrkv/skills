@@ -11,7 +11,6 @@ first 8 hex of sha256 of the root commit and basename is the normalized repo
 folder name (a readable signature, set at creation). Local ids resolve BY
 HASH (glob `local/<hash8>-*`), so renaming the repo folder keeps its history;
 several matches are an error. A non-git directory hashes its path.
-The old ~/.security-audit path is not read (no auto-migration).
 
 Subcommands (--repo PATH is accepted before or after the subcommand):
 

@@ -10,8 +10,7 @@ implements the storage rules.
   environment variable (every script honors it; evals use it to isolate
   their runs from the real store). `SECURITY_AUDIT_REPO_ID` overrides the
   computed repo-id outright (used when the target is a plain directory
-  inside another git repository). The old `~/.security-audit` path is not
-  read (no auto-migration).
+  inside another git repository).
 - `<repo-id>`: the normalized `origin` URL — strip the scheme, credentials,
   and `.git`; lowercase the host; lowercase the path on github.com,
   gitlab.com, and bitbucket.org (case-insensitive hosts). Without a remote:

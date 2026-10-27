@@ -72,8 +72,6 @@ it.
 └── REPORT.md         # human-readable report
 ```
 
-The old `~/.security-audit` path is not read (no auto-migration).
-
 - `repo-id` — normalized `origin` URL (`github.com/owner/repo`: scheme, credentials, and `.git` stripped, host lowercased). Without a remote — `local/<hash8>-<name>`: first 8 hex of the root-commit sha256 plus the normalized repo folder name. The name is a readable signature set at creation; resolution is by hash (glob `local/<hash8>-*`), so renaming the repo folder keeps its history, and several hash matches are an error. A non-git directory hashes its path. Computed by `scripts/run_store.py repo-id`.
 - Run directory — next `<n>` for the date (`scripts/run_store.py next-run-dir`). Snapshots are immutable: a run never edits or deletes earlier snapshots; corrections land in the next run.
 - Memory between runs: the latest snapshot supplies open findings and rejected records; the latest **full** snapshot supplies coverage gaps and the previous threat model. Open findings (confirmed / likely / needs_review) are rechecked at every full run; a fix confirmed only on an uncommitted tree keeps the finding (`fixed_pending`) until a later run confirms it on a committed state (closed findings land in the snapshot's `fixed` array). Rejected records are carried verbatim until their trace changes or the 90-day term expires — either re-opens verification on the same id.
