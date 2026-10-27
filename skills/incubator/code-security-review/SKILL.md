@@ -16,7 +16,7 @@ description: |
   Do NOT trigger to explain security concepts, write security documentation,
   or configure scanners or CI (gitleaks, semgrep, Snyk, Dependabot).
 metadata:
-  version: "2.1.0"
+  version: "2.2.0"
   user-invocable: "true"
 ---
 
@@ -54,6 +54,53 @@ snapshot: the previous findings with updated verdicts for those rechecked.
 `coverage.json` and `threat-model.md` are referenced, not rewritten. The
 latest snapshot of any kind is the current state; the next full run supersedes
 it.
+
+## Execution modes
+
+Three ways a run can be executed. The choice changes orchestration only: the
+pipeline, the contracts, and the validator's verdict are identical in all
+three — `validate_findings.py` must print OK on the same snapshot whichever
+way the run went.
+
+| Way | What drives the run |
+|-----|---------------------|
+| **subagents** (default) | the orchestrator agent launches each fan-out itself |
+| **workflow** | a deterministic orchestrator script drives the same graph (`references/workflow.md`), translated to the harness's workflow API |
+| **linear** | sequential passes in one context — the fallback, rules below |
+
+### Choosing (defaults, not restrictions)
+
+| Situation | Default |
+|-----------|---------|
+| quick: a diff, a file, a question | in-context hunting; verifiers as subagents |
+| full: small repository (estimate ≲ 45 agent calls) | subagents |
+| full: large repository / many subsystems (estimate ≳ 45 calls) | propose workflow |
+| recheck: few open findings (≤ 20) | subagents |
+| recheck: many open findings (> 20) | propose workflow |
+
+Estimate before choosing: `3 (recon) + 1.3 × open findings (recheck, second
+verifiers included) + units (scouts) + 2 (critics) + 1.3 × min(20,
+candidates) (verifiers, second verifiers included) + 2 (assembly, review)`.
+A typical small repository (6–12 units, ≤ 30 code files) lands at 30–45
+calls; a large one (units beyond 12, several subsystems with their own entry
+surfaces, multi-wave coverage ahead) passes 60. Past roughly 45 calls the
+deterministic budget accounting, wave control, and validator repair loop of
+a workflow pay for themselves; below it subagents are simpler and just as
+isolated. Recheck over more than 20 open findings means 20+ verifiers before
+a single new candidate — the same territory.
+
+Rules:
+
+- If the user explicitly asked for a workflow, use the workflow in any mode,
+  quick included. If the user explicitly asked for subagents or "without a
+  workflow", never propose or use one.
+- "Propose" means exactly one line: the scale estimate (≈ N agent calls) and
+  the reason, then wait for the answer. Without consent, run subagents.
+- If the harness has no workflow support, run subagents. If there is no
+  agent-launching tool at all, run linearly (rules below).
+- `coverage.json.execution` records how the run went (`workflow` /
+  `subagents` / `linear`); the REPORT.md header states the mode alongside
+  what ran without isolation.
 
 ## Hard rules
 
@@ -122,10 +169,12 @@ The snapshot records exactly what ran without isolation:
 `coverage.json.degradation` lists the degraded phases
 (`recon`/`scouts`/`critic`/`verification`/`reviewer`) and the ids of findings
 whose verifiers failed or ran in-context; the findings.json `degraded` flag is
-true when either list is non-empty. Every REPORT.md header states what was
-verified without isolation and why, alongside what was not covered (from
-`coverage.json`) and the owner assumptions rejections rest on; without
-coverage proof a report never calls the code clean.
+true when either list is non-empty. `coverage.json.execution` names the
+execution mode (`workflow` / `subagents` / `linear`). Every REPORT.md header
+states the execution mode, what was verified without isolation and why,
+alongside what was not covered (from `coverage.json`) and the owner
+assumptions rejections rest on; without coverage proof a report never calls
+the code clean.
 
 ## Scopes
 
@@ -168,6 +217,8 @@ an unauthenticated injection that reads arbitrary tables anchors at critical
 - `references/recon.md` — Phases 0–1: preparation, recon agents, STRIDE model + diff, recheck of open findings
 - `references/scouts.md` — Phases 2–4: scout assignment, invariant hunting method, candidate board, coverage critic, dedup
 - `references/verification.md` — Phases 5–7: verifier pool, second-verifier rule, severity, report reviewer; recheck mode
+- `references/workflow.md` — the harness-neutral workflow graph: primitives, nodes, edges, budget, gates, invariants; used when the run goes through a workflow
+- `references/schemas/*.json` — the shared schemas (candidate, verdict, recheck verdict, findings record): the single source for every agent contract and the board check
 - `references/trust-rules.md` — trust rules R1–R10, hard exclusions, precedents
 - `references/threat-classes.md` — the threat taxonomy: classes, control essence, CWE anchors
 - `references/data-schema.md` — snapshot layout, findings.json / coverage.json shapes, fingerprint format

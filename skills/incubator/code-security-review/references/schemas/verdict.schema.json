@@ -1,0 +1,82 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "verdict.schema.json",
+  "title": "Verifier verdict",
+  "description": "The exact one-object response of a Phase 5 verifier (fresh context, refute-first). Read by verifier prompts, the workflow graph, and validate_findings.py (enum agreement). Field semantics: verification.md.",
+  "type": "object",
+  "required": [
+    "id",
+    "status",
+    "severity",
+    "confidence",
+    "reachability",
+    "exploitability",
+    "exploitation_path",
+    "existing_mitigations",
+    "owner_assumptions",
+    "reason",
+    "evidence",
+    "missing_fact"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^F-[0-9]{4,}$",
+      "description": "The finding id under verdict."
+    },
+    "status": {
+      "enum": ["confirmed", "likely", "needs_review", "rejected"],
+      "description": "The verdict. severity/exploitation_path apply only to confirmed/likely; a rejected verdict names the refuting code in evidence; a needs_review carries exactly one decisive missing_fact."
+    },
+    "severity": {
+      "enum": ["critical", "high", "medium", "low", null],
+      "description": "From the impact anchors in SKILL.md; non-null only for confirmed/likely."
+    },
+    "confidence": {
+      "enum": ["high", "medium", "low"]
+    },
+    "reachability": {
+      "enum": ["external", "authenticated", "internal", "unreachable"]
+    },
+    "exploitability": {
+      "enum": ["easy", "medium", "hard", "not_exploitable"]
+    },
+    "exploitation_path": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Attacker-controlled source to sink, one step per element; only for confirmed/likely."
+    },
+    "existing_mitigations": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Mitigations found on the path, each with file:line."
+    },
+    "owner_assumptions": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "User-supplied or deployment facts the verdict rests on."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Why this verdict."
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["file", "line", "note"],
+        "properties": {
+          "file": {"type": "string"},
+          "line": {"type": "integer", "minimum": 0},
+          "note": {"type": "string"}
+        }
+      },
+      "description": "Always present; a rejection names the code that refutes the candidate."
+    },
+    "missing_fact": {
+      "type": ["string", "null"],
+      "description": "The one decisive fact a needs_review could not establish; null otherwise."
+    }
+  }
+}

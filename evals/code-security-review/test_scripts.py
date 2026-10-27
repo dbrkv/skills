@@ -122,6 +122,26 @@ def rejected(**over) -> dict:
     return base
 
 
+def board_candidate(**over) -> dict:
+    """A candidates.jsonl line: the candidate fields of
+    candidate.schema.json plus the board id and unit."""
+    base = {
+        "id": "u1-c1",
+        "unit": "http-public::unauthenticated",
+        "path": "src/routes/users.js",
+        "symbol": "usersRouter GET /users",
+        "title": "SQL injection in user search",
+        "threat_class": "INJ",
+        "cwe": "CWE-89",
+        "root_cause_slug": "sql-concat-in-search",
+        "analysis": "search param interpolated into the SQL string",
+        "trace_paths": ["src/routes/users.js"],
+        "severity_guess": "high",
+    }
+    base.update(over)
+    return base
+
+
 def derive_summary(findings, rej, date="2026-10-27T12:00:00Z", run_id="2026-10-27-1", fixed=()):
     counts = Counter(f["status"] for f in findings)
     sev = Counter(f.get("severity") for f in findings if f["status"] in ("confirmed", "likely"))
@@ -564,6 +584,7 @@ class ValidatorTests(unittest.TestCase):
         run.mkdir(parents=True, exist_ok=True)
 
         def with_coverage(coverage, doc):
+            coverage.setdefault("execution", "subagents")
             (run / "coverage.json").write_text(json.dumps(coverage))
             return self.validate(doc)
 
@@ -604,7 +625,8 @@ class ValidatorTests(unittest.TestCase):
         run.mkdir(parents=True, exist_ok=True)
 
         def with_coverage(deg, doc, prev=None):
-            (run / "coverage.json").write_text(json.dumps({"degradation": deg}))
+            (run / "coverage.json").write_text(
+                json.dumps({"execution": "subagents", "degradation": deg}))
             doc["degraded"] = bool(deg["phases"] or deg["findings"])
             return self.validate(doc, prev=prev)
 
@@ -651,6 +673,69 @@ class ValidatorTests(unittest.TestCase):
         doc["degraded"] = True
         self.assertEqual(self.validate(doc), [])
 
+    def test_coverage_execution_field(self):
+        run = self.base / "runs" / "2026-10-27-1"
+        run.mkdir(parents=True, exist_ok=True)
+
+        def with_coverage(cov, doc):
+            (run / "coverage.json").write_text(json.dumps(cov))
+            return self.validate(doc)
+
+        empty_deg = {"phases": [], "findings": []}
+        # execution is required whenever coverage.json exists
+        errs = with_coverage({"degradation": empty_deg}, snapshot_doc())
+        self.assertTrue(any("execution" in e for e in errs))
+        # unknown tokens are refused
+        errs = with_coverage({"execution": "hybrid", "degradation": empty_deg},
+                             snapshot_doc())
+        self.assertTrue(any("execution" in e and "hybrid" in e for e in errs))
+        # the three modes are accepted, independent of degradation
+        for mode in ("workflow", "subagents", "linear"):
+            self.assertEqual(
+                with_coverage({"execution": mode, "degradation": empty_deg},
+                              snapshot_doc()), [], mode)
+        # a degraded linear run still records linear as its execution mode
+        doc = snapshot_doc(findings=[finding(validated_in_context=True)])
+        doc["degraded"] = True
+        self.assertEqual(
+            with_coverage({"execution": "linear",
+                           "degradation": {"phases": ["verification"],
+                                           "findings": ["F-0001"]}}, doc), [])
+        # execution alone does not set the degraded flag
+        errs = with_coverage({"execution": "linear", "degradation": empty_deg},
+                             snapshot_doc())
+        self.assertEqual(errs, [])
+
+    def test_degraded_rejected_high_never_in_context(self):
+        run = self.base / "runs" / "2026-10-27-1"
+        run.mkdir(parents=True, exist_ok=True)
+
+        def with_coverage(deg, doc):
+            (run / "coverage.json").write_text(
+                json.dumps({"execution": "linear", "degradation": deg}))
+            doc["degraded"] = bool(deg["phases"] or deg["findings"])
+            return self.validate(doc)
+
+        # a high/critical rejection resting on an in-context verdict is
+        # invalid in any degraded run (linear or partial)
+        for mode in ("linear",):
+            rej_high = rejected(id="F-0003", severity="high",
+                                validated_in_context=True, verdict_date="2026-10-27")
+            errs = with_coverage({"phases": ["verification"], "findings": ["F-0003"]},
+                                 snapshot_doc(rej=[rej_high]))
+            self.assertTrue(any("in-context verdict" in e for e in errs), mode)
+        # medium refuted in-context in a degraded run is honest and valid
+        rej_med = rejected(id="F-0004", severity="medium",
+                           validated_in_context=True, verdict_date="2026-10-27")
+        self.assertEqual(
+            with_coverage({"phases": ["verification"], "findings": ["F-0004"]},
+                          snapshot_doc(rej=[rej_med])), [])
+        # and the flag cannot be omitted for an id listed as degraded
+        rej_med_hidden = rejected(id="F-0004", severity="medium", verdict_date="2026-10-27")
+        errs = with_coverage({"phases": [], "findings": ["F-0004"]},
+                             snapshot_doc(rej=[rej_med_hidden]))
+        self.assertTrue(any("degradation.findings but lacks" in e for e in errs))
+
     def test_rejected_needs_verdict_date(self):
         r = rejected(verdict_date=None)
         errs = self.validate(snapshot_doc(rej=[r]))
@@ -696,6 +781,80 @@ class ValidatorTests(unittest.TestCase):
         self.assertTrue(any("summary.rechecked.still_open" in e for e in errs))
 
 
+class SchemaTests(unittest.TestCase):
+    """references/schemas: every file is a valid JSON Schema, the four
+    expected schemas exist, and validate_findings.py leans on them."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+        self.addCleanup(self.tmp.cleanup)
+
+    def test_real_schemas_dir_passes(self):
+        self.assertEqual(validate_findings.validate_schemas(), [])
+
+    def test_each_schema_file_is_valid_json_schema(self):
+        names = {p.name for p in validate_findings.SCHEMAS_DIR.glob("*.json")}
+        self.assertTrue(set(validate_findings.EXPECTED_SCHEMAS) <= names,
+                        f"schemas dir is missing: {set(validate_findings.EXPECTED_SCHEMAS) - names}")
+        for p in validate_findings.SCHEMAS_DIR.glob("*.json"):
+            with self.subTest(schema=p.name):
+                schema = json.loads(p.read_text())
+                self.assertIsInstance(schema, dict)
+                self.assertIn("json-schema", str(schema.get("$schema", "")))
+                self.assertIn("type", schema)
+                self.assertTrue(schema.get("required") or schema.get("properties"))
+
+    def test_missing_schemas_dir_fails(self):
+        errs = validate_findings.validate_schemas(self.base / "nope")
+        self.assertEqual(len(errs), 1)
+        self.assertIn("directory missing", errs[0])
+
+    def test_missing_expected_schema_fails(self):
+        errs = validate_findings.validate_schemas(self.base)   # empty dir
+        self.assertTrue(any("candidate.schema.json" in e for e in errs))
+        self.assertTrue(any("verdict.schema.json" in e for e in errs))
+        self.assertTrue(any("recheck-verdict.schema.json" in e for e in errs))
+        self.assertTrue(any("finding-record.schema.json" in e for e in errs))
+
+    def copy_schemas(self):
+        dst = self.base / "schemas"
+        shutil.copytree(validate_findings.SCHEMAS_DIR, dst)
+        return dst
+
+    def test_non_schema_file_fails(self):
+        dst = self.copy_schemas()
+        (dst / "notes.json").write_text('{"hello": "world"}')
+        errs = validate_findings.validate_schemas(dst)
+        self.assertTrue(any("notes.json" in e and "not a valid JSON Schema" in e
+                            for e in errs))
+
+    def test_enum_drift_fails(self):
+        dst = self.copy_schemas()
+        schema = json.loads((dst / "verdict.schema.json").read_text())
+        schema["properties"]["status"]["enum"].append("bogus")
+        (dst / "verdict.schema.json").write_text(json.dumps(schema))
+        errs = validate_findings.validate_schemas(dst)
+        self.assertTrue(any("drifted" in e and "verdict.schema.json" in e for e in errs))
+
+    def test_missing_enum_node_fails(self):
+        dst = self.copy_schemas()
+        schema = json.loads((dst / "recheck-verdict.schema.json").read_text())
+        del schema["properties"]["result"]
+        (dst / "recheck-verdict.schema.json").write_text(json.dumps(schema))
+        errs = validate_findings.validate_schemas(dst)
+        self.assertTrue(any("lacks properties.result" in e for e in errs))
+
+    def test_candidate_required_fields_come_from_the_schema(self):
+        required = validate_findings.candidate_required_fields()
+        self.assertIn("severity_guess", required)
+        self.assertIn("root_cause_slug", required)
+        # the board check enforces exactly these fields
+        self.assertIn("trace_paths", required)
+        # a drifted schema dir yields no required list (never crashes)
+        self.assertEqual(validate_findings.candidate_required_fields(self.base), [])
+
+
 class EvalsJsonTests(unittest.TestCase):
     def test_evals_json_parses(self):
         p = Path(__file__).resolve().parent / "evals.json"
@@ -727,7 +886,17 @@ class BoardAccountingTests(unittest.TestCase):
             findings=[finding(merged_from=["u1-c1"])],
             rej=[rejected(merged_from=["u2-c1"])],
             suppressed=[{"id": "F-0002", "reason": "x", "candidates": ["u3-c1"]}])
-        board = self.write_board([{"id": "u1-c1"}, {"id": "u2-c1"}, {"id": "u3-c1"}])
+        board = self.write_board([
+            board_candidate(id="u1-c1"),
+            board_candidate(id="u2-c1", unit="http-auth::authenticated",
+                            path="src/config.js", title="Static secret",
+                            root_cause_slug="static-secret",
+                            severity_guess="medium"),
+            board_candidate(id="u3-c1", path="src/routes/admin.js",
+                            title="Admin search SQL injection",
+                            root_cause_slug="admin-sql-concat",
+                            severity_guess="high"),
+        ])
         run = self.base / "runs" / "2026-10-27-1"
         run.mkdir(parents=True)
         path = run / "findings.json"
@@ -740,7 +909,8 @@ class BoardAccountingTests(unittest.TestCase):
         doc = snapshot_doc(findings=[finding(merged_from=["u1-c1"])],
                            rej=[rejected()],   # F-0002 carries no merged_from
                            suppressed=[])
-        board = self.write_board([{"id": "u1-c1"}, {"id": "u2-c1"}])   # u2-c1 vanishes
+        board = self.write_board([board_candidate(id="u1-c1"),
+                                  board_candidate(id="u2-c1")])   # u2-c1 vanishes
         run = self.base / "runs" / "2026-10-27-1"
         run.mkdir(parents=True)
         path = run / "findings.json"
@@ -749,6 +919,21 @@ class BoardAccountingTests(unittest.TestCase):
                             str(path), "--board", str(board)], capture_output=True, text=True)
         self.assertEqual(r.returncode, 1)
         self.assertIn("u2-c1 is not accounted", r.stdout)
+
+    def test_board_line_must_satisfy_candidate_schema(self):
+        doc = snapshot_doc(findings=[finding(merged_from=["u1-c1", "u2-c1"])])
+        # u2-c1 is accounted for but misses fields required by candidate.schema.json
+        board = self.write_board([board_candidate(id="u1-c1"),
+                                  {"id": "u2-c1", "unit": "http-public::unauthenticated"}])
+        run = self.base / "runs" / "2026-10-27-1"
+        run.mkdir(parents=True)
+        path = run / "findings.json"
+        path.write_text(json.dumps(doc))
+        r = subprocess.run([PYTHON, str(Path(validate_findings.__file__)),
+                            str(path), "--board", str(board)], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("candidate.schema.json", r.stdout)
+        self.assertIn("severity_guess", r.stdout)
 
 
 class PrevCarryTests(unittest.TestCase):

@@ -22,13 +22,96 @@ REASON_CODES = {"missing_fact", "validator_output_invalid", "not_validated",
                 "no_independent_verifier"}
 RECHECK_RESULTS = {"still_open", "fixed", "fixed_pending", "moved", "cant_tell"}
 DEGRADED_PHASES = {"recon", "scouts", "critic", "verification", "reviewer"}
+EXECUTION_MODES = {"workflow", "subagents", "linear"}
 ID_RE = re.compile(r"^F-\d{4,}$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 HEX_REF_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
 
+SCHEMAS_DIR = Path(__file__).resolve().parent.parent / "references" / "schemas"
+EXPECTED_SCHEMAS = ("candidate.schema.json", "verdict.schema.json",
+                    "recheck-verdict.schema.json", "finding-record.schema.json")
+
 
 def bad_hex(field, value, where):
     return f"{where}: {field} must be a commit hex (7-40 chars), got {value!r}"
+
+
+def validate_schemas(schemas_dir: Path = None) -> list:
+    """The shared schemas in references/schemas are the contract behind the
+    prompts, the workflow graph, and this validator. Every file there must be
+    a JSON Schema object, the four expected schemas must exist, and their
+    enums must agree with the constants this validator enforces — a drifted
+    schema means prompts and validation no longer describe the same data."""
+    errs = []
+    root = Path(schemas_dir) if schemas_dir else SCHEMAS_DIR
+    if not root.is_dir():
+        return [f"schemas: directory missing: {root}"]
+    try:
+        schemas = {}
+        for p in sorted(root.glob("*.json")):
+            try:
+                schema = json.loads(p.read_text())
+            except (json.JSONDecodeError, OSError) as e:
+                errs.append(f"schemas: {p.name} unreadable ({e})")
+                continue
+            if not isinstance(schema, dict) or "json-schema" not in str(schema.get("$schema", "")) \
+                    or "type" not in schema:
+                errs.append(f"schemas: {p.name} is not a valid JSON Schema "
+                            "(an object with a $schema and a type)")
+                continue
+            schemas[p.name] = schema
+    except OSError as e:
+        return [f"schemas: unreadable directory ({e})"]
+    for name in EXPECTED_SCHEMAS:
+        if name not in schemas:
+            errs.append(f"schemas: expected {name} in {root}")
+
+    def enum_of(name, path, want, label):
+        schema = schemas.get(name)
+        if schema is None:
+            return
+        node = schema
+        for key in path:
+            node = node.get(key) if isinstance(node, dict) else None
+            if node is None:
+                errs.append(f"schemas: {name} lacks {'.'.join(path)} ({label})")
+                return
+        got = set(node.get("enum", []))
+        if got != want:
+            errs.append(f"schemas: {name} {'.'.join(path)} enum drifted from the validator: "
+                        f"schema has {sorted(got)}, validator has {sorted(want)}")
+
+    enum_of("verdict.schema.json", ["properties", "status"],
+            STATUSES | {"rejected"}, "verdict statuses")
+    enum_of("verdict.schema.json", ["properties", "severity"],
+            SEVERITIES | {None}, "verdict severities")
+    enum_of("recheck-verdict.schema.json", ["properties", "result"],
+            RECHECK_RESULTS, "recheck results")
+    enum_of("recheck-verdict.schema.json", ["properties", "status"],
+            STATUSES | {None}, "recheck status updates")
+    enum_of("finding-record.schema.json", ["properties", "status"],
+            STATUSES, "record statuses")
+    enum_of("finding-record.schema.json", ["properties", "severity"],
+            SEVERITIES | {None}, "record severities")
+    enum_of("finding-record.schema.json", ["properties", "reason_code"],
+            REASON_CODES | {None}, "reason codes")
+    enum_of("finding-record.schema.json", ["properties", "stride"], STRIDES, "stride tokens")
+    enum_of("finding-record.schema.json",
+            ["properties", "last_recheck", "properties", "result"],
+            RECHECK_RESULTS, "last_recheck results")
+    return errs
+
+
+def candidate_required_fields(schemas_dir: Path = None) -> list:
+    """The board-line required fields, read from candidate.schema.json — the
+    board check leans on the schema instead of a second hard-coded list."""
+    root = Path(schemas_dir) if schemas_dir else SCHEMAS_DIR
+    try:
+        schema = json.loads((root / "candidate.schema.json").read_text())
+    except (json.JSONDecodeError, OSError):
+        return []
+    required = schema.get("required", [])
+    return required if isinstance(required, list) else []
 
 
 def validate(data: dict, path: Path, prev: dict = None) -> list:
@@ -223,10 +306,11 @@ def validate(data: dict, path: Path, prev: dict = None) -> list:
 
 
 def validate_coverage(coverage_path: Path, data: dict, prev: dict = None) -> list:
-    """Degradation accounting: phases are known tokens, every listed finding
-    id resolves in this snapshot, the findings.json `degraded` flag is true
-    exactly when either degradation list is non-empty, and no in-context
-    verdict hides behind a missing `validated_in_context` flag."""
+    """Degradation accounting: the run's execution mode is recorded, phases
+    are known tokens, every listed finding id resolves in this snapshot, the
+    findings.json `degraded` flag is true exactly when either degradation
+    list is non-empty, and no in-context verdict hides behind a missing
+    `validated_in_context` flag."""
     errs = []
     try:
         cov = json.loads(coverage_path.read_text())
@@ -234,6 +318,10 @@ def validate_coverage(coverage_path: Path, data: dict, prev: dict = None) -> lis
         return [f"coverage.json: unreadable ({e})"]
     if not isinstance(cov, dict):
         return ["coverage.json: not an object"]
+    execution = cov.get("execution")
+    if execution not in EXECUTION_MODES:
+        errs.append(f"coverage.json: execution must record how the run went — one of "
+                    f"{sorted(EXECUTION_MODES)}, got {execution!r}")
     deg = cov.get("degradation") or {}
     if not isinstance(deg, dict):
         return ["coverage.json: degradation must be an object"]
@@ -288,10 +376,14 @@ def validate_coverage(coverage_path: Path, data: dict, prev: dict = None) -> lis
     return errs
 
 
-def validate_board(board_path: Path, data: dict) -> list:
+def validate_board(board_path: Path, data: dict, candidate_required=None) -> list:
     """Every candidate on the board maps to a bucket: a finding's or rejected
-    record's merged_from, or a suppressed entry's candidates. None vanish."""
+    record's merged_from, or a suppressed entry's candidates. None vanish.
+    Each board line also satisfies the required fields of
+    candidate.schema.json — the schema is the single source of the board
+    record's shape."""
     errs = []
+    required = list(candidate_required or [])
     board_ids = set()
     try:
         for line in board_path.read_text().splitlines():
@@ -302,6 +394,10 @@ def validate_board(board_path: Path, data: dict) -> list:
             cid = rec.get("id") or rec.get("local_id") or rec.get("candidate_id")
             if cid:
                 board_ids.add(str(cid))
+            missing = [f for f in required if not rec.get(f)]
+            if missing:
+                errs.append(f"board candidate {cid}: missing required field(s) "
+                            f"{', '.join(missing)} (candidate.schema.json)")
     except (OSError, ValueError) as e:
         return [f"board {board_path.name}: unreadable ({e})"]
     if not board_ids:
@@ -381,20 +477,20 @@ def main(argv):
               file=sys.stderr)
         return 2
     path = Path(rest[0])
+    errs = validate_schemas()
     try:
         data = json.loads(path.read_text())
     except (json.JSONDecodeError, OSError) as e:
         print(f"ERROR: {e}")
         return 1
     prev_data = None
-    errs = []
     if prev is not None:
         prev_data, prev_err = load_prev(prev)
         if prev_err:
             errs.append(prev_err)
     errs += validate(data, path, prev_data)
     if board is not None:
-        errs += validate_board(board, data)
+        errs += validate_board(board, data, candidate_required_fields())
     if prev_data is not None:
         errs += validate_prev(prev_data, data)
     if errs:

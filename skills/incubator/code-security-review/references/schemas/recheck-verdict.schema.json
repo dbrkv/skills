@@ -1,0 +1,66 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "recheck-verdict.schema.json",
+  "title": "Recheck verdict",
+  "description": "The exact one-object response of a recheck verifier (Phase 1 recheck pass or recheck mode) checking a previously reported finding against the current code. Read by recheck prompts, the workflow graph, and validate_findings.py (enum agreement). Field semantics: verification.md.",
+  "type": "object",
+  "required": [
+    "id",
+    "result",
+    "status",
+    "severity",
+    "fingerprint",
+    "line_range",
+    "evidence",
+    "owner_assumptions",
+    "reason"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^F-[0-9]{4,}$",
+      "description": "The finding id being rechecked."
+    },
+    "result": {
+      "enum": ["still_open", "fixed", "fixed_pending", "moved", "cant_tell"],
+      "description": "Exactly one result; do not re-litigate the original verdict where the code has not changed."
+    },
+    "status": {
+      "enum": ["confirmed", "likely", "needs_review", null],
+      "description": "Update, sent only for still_open and moved."
+    },
+    "severity": {
+      "enum": ["critical", "high", "medium", "low", null],
+      "description": "Update, sent only for still_open and moved."
+    },
+    "fingerprint": {
+      "type": ["string", "null"],
+      "description": "New fingerprint; only for moved (the orchestrator appends the old one to previous_fingerprints)."
+    },
+    "line_range": {
+      "type": ["string", "null"],
+      "description": "Updated line range; only for still_open and moved."
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["file", "line", "note"],
+        "properties": {
+          "file": {"type": "string"},
+          "line": {"type": "integer", "minimum": 0},
+          "note": {"type": "string"}
+        }
+      },
+      "description": "fixed and fixed_pending must cite the blocking code; cant_tell names the missing fact in reason."
+    },
+    "owner_assumptions": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "reason": {
+      "type": "string",
+      "description": "Why this result."
+    }
+  }
+}

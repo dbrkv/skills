@@ -1,0 +1,133 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "finding-record.schema.json",
+  "title": "findings.json record",
+  "description": "One record of findings.json: an open finding, a rejected record, or a fixed record. The document skeleton around the arrays (kind, repo_id, run_id, summary, ...) is defined in references/data-schema.md; validate_findings.py checks this schema's enums against its own constants. Id F-NNNN is the primary key; the fingerprint format is <path>::<symbol>::<slug>.",
+  "type": "object",
+  "required": ["id", "fingerprint", "title"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^F-[0-9]{4,}$",
+      "description": "Primary key: unique within a snapshot, stable across snapshots for the same root cause."
+    },
+    "fingerprint": {
+      "type": "string",
+      "description": "<path>::<symbol>::<slug>; repo-relative path, enclosing symbol, 2-5-word root-cause slug."
+    },
+    "previous_fingerprints": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Old fingerprints of a moved finding, oldest first."
+    },
+    "title": {"type": "string"},
+    "threat_class": {"type": "string"},
+    "cwe": {
+      "type": "string",
+      "pattern": "^CWE-[0-9]+$"
+    },
+    "stride": {
+      "enum": ["Spoofing", "Tampering", "Repudiation", "InfoDisclosure", "DoS", "ElevationOfPrivilege"]
+    },
+    "file": {"type": "string"},
+    "symbol": {"type": "string"},
+    "line_range": {"type": "string"},
+    "code_context": {"type": "string"},
+    "entry_points": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "trace_paths": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "trace-changed watches these paths between verdict_source_ref and the working tree."
+    },
+    "exploitation_path": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Open findings only; required for confirmed/likely."
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["file", "line", "note"],
+        "properties": {
+          "file": {"type": "string"},
+          "line": {"type": "integer", "minimum": 0},
+          "note": {"type": "string"}
+        }
+      }
+    },
+    "status": {
+      "enum": ["confirmed", "likely", "needs_review"],
+      "description": "Open-finding branch only; rejected and fixed records live in their own arrays."
+    },
+    "severity": {
+      "enum": ["critical", "high", "medium", "low", null],
+      "description": "Present iff status is confirmed or likely (disputed findings may carry a provisional severity)."
+    },
+    "confidence": {"enum": ["high", "medium", "low"]},
+    "reachability": {"enum": ["external", "authenticated", "internal", "unreachable"]},
+    "exploitability": {"enum": ["easy", "medium", "hard", "not_exploitable"]},
+    "existing_mitigations": {"type": "array", "items": {"type": "string"}},
+    "disputed": {
+      "type": "boolean",
+      "description": "Second-verifier disagreement; requires verifier_reasons (>= 2, both positions verbatim)."
+    },
+    "verifier_reasons": {"type": "array", "items": {"type": "string"}},
+    "validated_in_context": {
+      "type": "boolean",
+      "description": "True when this record's verdict was produced in the orchestrator's context instead of by an isolated verifier (linear mode, or a medium/low finding verified in-context after two failed verifier launches). A rejected or fixed record with this flag must carry a provisional severity of medium or low."
+    },
+    "owner_assumptions": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "User-supplied or deployment facts the verdict rests on; rendered in REPORT.md."
+    },
+    "missing_fact": {
+      "type": ["string", "null"],
+      "description": "Non-empty exactly when reason_code is missing_fact."
+    },
+    "reason_code": {
+      "enum": ["missing_fact", "validator_output_invalid", "not_validated", "no_independent_verifier", null],
+      "description": "Required on needs_review; null elsewhere."
+    },
+    "recommended_fix": {"type": "string"},
+    "verdict_date": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+      "description": "Never changes when a rejected record is carried into a newer snapshot."
+    },
+    "verdict_source_ref": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{7,40}$",
+      "description": "Commit hex, never a branch name or HEAD."
+    },
+    "last_recheck": {
+      "type": ["object", "null"],
+      "required": ["run_id", "date", "result"],
+      "properties": {
+        "run_id": {"type": "string"},
+        "date": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+        "result": {
+          "enum": ["still_open", "fixed", "fixed_pending", "moved", "cant_tell"]
+        }
+      }
+    },
+    "reason": {
+      "type": "string",
+      "description": "Rejected branch: the refutation. Fixed branch: omitted (evidence carries the closure)."
+    },
+    "recheck_date": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+      "description": "Fixed branch only."
+    },
+    "merged_from": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Board candidate ids that deduped into this record; every board id maps to exactly one bucket."
+    }
+  }
+}

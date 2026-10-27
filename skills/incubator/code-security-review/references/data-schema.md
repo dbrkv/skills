@@ -2,7 +2,12 @@
 
 The shapes of everything the skill writes. `scripts/validate_findings.py`
 checks `findings.json` against this contract; `scripts/run_store.py`
-implements the storage rules.
+implements the storage rules. The agent-facing response and record schemas
+live as JSON Schema in `references/schemas/` — candidate (the board record),
+verdict, recheck verdict, findings record — and are the single source for
+those shapes: prompts point agents at the files, the workflow graph returns
+them, and the validator cross-checks them on every run. Where a shape is
+defined in a schema file, this document does not repeat it.
 
 ## Storage root and identity
 
@@ -74,60 +79,34 @@ safe.
 }
 ```
 
-**Finding** (status `confirmed` | `likely` | `needs_review`):
+**Finding** / **RejectedRecord** / **FixedRecord** — every field, pattern,
+and enum of the three record branches is defined once in
+`references/schemas/finding-record.schema.json`; the schema is the contract
+and is not duplicated here. The branches:
 
-```json
-{
-  "id": "F-0012",
-  "fingerprint": "src/routes/users.js::usersRouter GET /users::sql-concat-in-search",
-  "previous_fingerprints": [],
-  "title": "SQL injection in user search",
-  "threat_class": "INJ",
-  "cwe": "CWE-89",
-  "stride": "Tampering",
-  "file": "src/routes/users.js",
-  "symbol": "usersRouter GET /users",
-  "line_range": "41-49",
-  "code_context": "const sql = `SELECT ... WHERE name LIKE '%${q}%'`",
-  "entry_points": ["GET /users"],
-  "trace_paths": ["src/routes/users.js", "src/db.js"],
-  "exploitation_path": ["GET /users?q= (attacker-controlled)", "q interpolated into the SQL string", "db executes the query"],
-  "evidence": [{"file": "src/routes/users.js", "line": 45, "note": "concat of user input into SQL"}],
-  "status": "confirmed",
-  "severity": "high",
-  "confidence": "high",
-  "reachability": "external",
-  "exploitability": "easy",
-  "existing_mitigations": [],
-  "disputed": false,
-  "validated_in_context": false,
-  "verifier_reasons": [],
-  "owner_assumptions": [],
-  "missing_fact": null,
-  "reason_code": null,
-  "recommended_fix": "parameterize the query",
-  "verdict_date": "2026-10-27",
-  "verdict_source_ref": "9f2c1e7",
-  "last_recheck": null
-}
-```
-
-**RejectedRecord** — the same identity core (id, fingerprint,
-previous_fingerprints, title, threat_class, cwe, file, symbol), plus `reason`
-(the refutation), `evidence`, `owner_assumptions`, `verdict_date`, and
-`verdict_source_ref`. A rejected record may also carry `severity` — the
-**provisional** severity the candidate entered verification with — and
-`validated_in_context` (see the field rules). **`verdict_date` never changes
-when a rejected record is carried into a newer snapshot** — the 90-day
-suppression term runs from the original verdict.
-
-**FixedRecord** — `{id, fingerprint, title, evidence, recheck_date}`, plus
-`validated_in_context` and the finding's `severity` when the closing recheck
-verdict was produced in-context (only medium/low may close that way): a
-finding closed as `fixed` in this run. Fixed records are not
-carried into the next snapshot's findings; they remain the trace of when a
-root cause closed and the base for spotting a regression if the same
-fingerprint returns.
+- **Finding** (status `confirmed` | `likely` | `needs_review`) — the open
+  finding: identity (id, fingerprint, `previous_fingerprints[]`), location,
+  trace (`entry_points`, `trace_paths`, `exploitation_path`, `evidence`),
+  verdict fields (status, severity, confidence, reachability, exploitability,
+  `existing_mitigations`, `disputed`, `verifier_reasons`,
+  `validated_in_context`, `owner_assumptions`, `missing_fact`,
+  `reason_code`), `recommended_fix`, `verdict_date`,
+  `verdict_source_ref`, `last_recheck`, `merged_from[]`.
+- **RejectedRecord** — the same identity core (id, fingerprint,
+  previous_fingerprints, title, threat_class, cwe, file, symbol), plus
+  `reason` (the refutation), `evidence`, `owner_assumptions`,
+  `verdict_date`, and `verdict_source_ref`. It may also carry `severity` —
+  the **provisional** severity the candidate entered verification with — and
+  `validated_in_context` (see the field rules). **`verdict_date` never
+  changes when a rejected record is carried into a newer snapshot** — the
+  90-day suppression term runs from the original verdict.
+- **FixedRecord** — `{id, fingerprint, title, evidence, recheck_date}`, plus
+  `validated_in_context` and the finding's `severity` when the closing recheck
+  verdict was produced in-context (only medium/low may close that way): a
+  finding closed as `fixed` in this run. Fixed records are not
+  carried into the next snapshot's findings; they remain the trace of when a
+  root cause closed and the base for spotting a regression if the same
+  fingerprint returns.
 
 ### Field rules
 
@@ -183,6 +162,7 @@ fingerprint returns.
 ```json
 {
   "run_id": "2026-10-27-1",
+  "execution": "subagents",
   "scope_exclusions": [
     {"path": ".agents/", "reason": "agent/skill tooling, not the target's code"}
   ],
@@ -220,6 +200,13 @@ lists the tool directories and files (`.agents/`, `.claude/`, `.cursor/`,
 `skills-lock.json`, ...) excluded from the scope in Phase 0 — each with a
 reason, so "not scanned" is always stated, never silent.
 
+`execution` records how the run went — `workflow` (deterministic orchestrator
+script per `references/workflow.md`), `subagents` (the default fan-out), or
+`linear` (sequential passes in one context). It is required whenever
+coverage.json is written, is echoed in the REPORT.md header, and is
+independent of degradation: a workflow run that degraded one verifier still
+says `workflow`.
+
 `degradation` records exactly what ran without isolation:
 `phases` is a subset of `recon` / `scouts` / `critic` / `verification` /
 `reviewer` — the fan-out phases that ran as sequential passes in one context;
@@ -227,7 +214,8 @@ reason, so "not scanned" is always stated, never silent.
 in-context. Partial degradation (3 of 8 verifiers failed) is recorded the
 same way, not as a global flag. Both lists empty in a fully isolated run.
 The findings.json `degraded` flag mirrors this object: true when either list
-is non-empty. A recheck snapshot has no coverage.json of its own — it
+is non-empty (the flag is kept for compatibility; the lists are the truth).
+A recheck snapshot has no coverage.json of its own — it
 references the base full snapshot's; in-context recheck verdicts are marked
 on the records (`validated_in_context`) and in the recheck REPORT header.
 
@@ -253,7 +241,12 @@ python3 scripts/validate_findings.py <run>/findings.json \
 python3 scripts/validate_findings.py <run>/findings.json --prev <latest-run-dir>
 ```
 
-The validator fails the file when: the JSON is unparseable; `kind` is not
+The validator first checks the shared schemas themselves: every file in
+`references/schemas/` must be a valid JSON Schema object, the four expected
+schemas (candidate, verdict, recheck-verdict, finding-record) must exist,
+and their enums must agree with the constants the validator enforces — a
+schema that drifted from the validator fails the run before any finding
+does. It then fails the file when: the JSON is unparseable; `kind` is not
 full or recheck; ids are duplicated (across findings, rejected, and fixed) or
 malformed; a status, severity, or STRIDE token is unknown; severity sits on
 needs_review or is missing on confirmed/likely; `source_ref` or a
@@ -268,7 +261,9 @@ medium or low; a recheck kind lacks a resolving `base_run` (it must point at
 a full snapshot); the summary counts disagree with the arrays (including
 `fixed` and `rechecked`); or `by_severity` does not sum to confirmed +
 likely. When a sibling `coverage.json` exists in the run directory (full
-snapshots), it also checks degradation accounting: `phases` holds only the
+snapshots), it also checks that `execution` is present and one of
+`workflow` / `subagents` / `linear`, and the degradation accounting:
+`phases` holds only the
 five known phase tokens, every id in `degradation.findings` resolves to a
 record in this snapshot, the findings.json `degraded` flag is true
 exactly when either degradation list is non-empty, and the flag cannot be
@@ -280,7 +275,8 @@ not carried verbatim from `--prev`). With `--board
 candidates.jsonl`, it additionally fails when any board candidate id is not
 accounted for in a finding's or rejected record's `merged_from` or a
 suppressed entry's `candidates` — no candidate may vanish between the board
-and the snapshot. With `--prev <run-dir>` (the base snapshot of a recheck, or
+and the snapshot — or when a board line misses a required field of
+`candidate.schema.json`. With `--prev <run-dir>` (the base snapshot of a recheck, or
 the previous run of a full run), it additionally fails when a rejected record
 carried without re-verify — the same `verdict_date` as the base — differs
 from the base record in any field; a record re-verified this run (new

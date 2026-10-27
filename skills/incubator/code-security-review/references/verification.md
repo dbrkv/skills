@@ -44,26 +44,9 @@ Verdict rules:
 
 The target's code is never executed. Source-level reasoning only.
 
-Return exactly one JSON object and no surrounding prose, per the contract.
-```
-
-**Response contract (copy verbatim):**
-
-```json
-{
-  "id": "F-0012",
-  "status": "confirmed | likely | needs_review | rejected",
-  "severity": "critical | high | medium | low | null",
-  "confidence": "high | medium | low",
-  "reachability": "external | authenticated | internal | unreachable",
-  "exploitability": "easy | medium | hard | not_exploitable",
-  "exploitation_path": ["attacker-controlled source", "...", "sink"],
-  "existing_mitigations": ["mitigation, with file:line"],
-  "owner_assumptions": ["assumption this verdict rests on, if any"],
-  "reason": "why this verdict",
-  "evidence": [{"file": "path", "line": 0, "note": "what this proves"}],
-  "missing_fact": null
-}
+Return exactly one JSON object and no surrounding prose, per the contract in
+references/schemas/verdict.schema.json — read the schema file and follow it;
+it is the contract and is not restated here.
 ```
 
 Field rules: `severity` non-null only for confirmed/likely;
@@ -199,23 +182,9 @@ has not changed:
 - cant_tell: the deciding fact is not source-visible (rule R9) — name it.
 
 The target's code is never executed. Return exactly one JSON object and no
-surrounding prose, per the contract.
-```
-
-Response contract:
-
-```json
-{
-  "id": "F-0012",
-  "result": "still_open | fixed | fixed_pending | moved | cant_tell",
-  "status": "confirmed | likely | needs_review | null",
-  "severity": "critical | high | medium | low | null",
-  "fingerprint": null,
-  "line_range": null,
-  "evidence": [{"file": "path", "line": 0, "note": "what this proves"}],
-  "owner_assumptions": [],
-  "reason": "why this result"
-}
+surrounding prose, per the contract in
+references/schemas/recheck-verdict.schema.json — read the schema file and
+follow it; it is the contract and is not restated here.
 ```
 
 Field rules: `status`, `severity`, `fingerprint`, `line_range` are updates
@@ -244,7 +213,9 @@ the reason names the impact that bounded it.
 
 REPORT.md structure (file contract: `data-schema.md`):
 
-1. **Header** — run id, kind, date, scope, source_ref, dirty; the degradation
+1. **Header** — run id, kind, date, scope, source_ref, dirty; the execution
+   mode (`workflow` / `subagents` / `linear`, as recorded in
+   `coverage.json.execution`); the degradation
    section: which phases and finding ids ran without isolation (from
    `coverage.json.degradation`) and why — the agent-launching tool was
    unavailable or verifiers failed — plus, per record, which verdicts are

@@ -225,9 +225,50 @@
       "expectations": [
         "A kind:full snapshot with findings.json exists in the copied store and passes scripts/validate_findings.py",
         "The CWE-89 finding in src/routes/admin_users.js is NOT rejected: it is confirmed or likely (with validated_in_context: true) or needs_review with reason_code no_independent_verifier",
-        "coverage.json has a degradation object whose phases and/or findings lists are non-empty, and findings.json degraded is true",
-        "REPORT.md header states which phases or findings ran without isolation and why (no subagent tool)",
+        "coverage.json has a degradation object whose phases and/or findings lists are non-empty, findings.json degraded is true, and coverage.json records execution: \"linear\"",
+        "REPORT.md header states which phases or findings ran without isolation and why (no subagent tool), and names the execution mode",
         "Any rejected record for the parameterized query in src/routes/products.js carries validated_in_context: true with a provisional severity of medium or low (a lower-severity in-context refutation is allowed)"
+      ]
+    },
+    {
+      "id": 21,
+      "name": "execution-choice-large-full",
+      "prompt": "Execution-mode choice test. The input directory holds a large multi-subsystem service (api/admin/hooks/web surfaces, 6 queue workers, shared lib - 37 code files). The user says: \"Проведи полный аудит репозитория в input directory (explicit request: audit and save the results)\". Follow the skill: BEFORE running the pipeline, apply the execution-mode choosing rules (SKILL.md, Execution modes). Save the FIRST chat answer you would give the user at this decision point to <outputs>/answer.md (the answer that precedes any actual audit work), and save any audit work you already started to <outputs>/state.md (or an empty file if you correctly started nothing yet).",
+      "expected_output": "The decision-point answer proposes the workflow execution mode in one line: a scale estimate (approximately how many agent calls the run needs) and the reason (large repo / many subsystems), then waits for the user's consent instead of starting the audit - without consent the run would use subagents. No audit pipeline has started yet.",
+      "files": [
+        "files/large-service"
+      ],
+      "expectations": [
+        "answer.md proposes running the audit as a workflow (per references/workflow.md / the Execution modes table for a large full run)",
+        "The proposal is exactly one line of scale estimate + reason, asking for consent - it does not start the audit unilaterally",
+        "answer.md contains a numeric scale estimate (agent calls) or a size reasoning that justifies the workflow (units/subsystems/calls)",
+        "No full run snapshot was started or written for this decision point (state.md is empty or absent)"
+      ]
+    },
+    {
+      "id": 22,
+      "name": "execution-choice-quick-diff",
+      "prompt": "Execution-mode choice test on a quick scan. A fixture app is already prepared at <app>: a git repo whose baseline commit is clean and whose STAGED changes (git add, uncommitted) add src/routes/lookup.js with a SQL injection. SECURITY_AUDIT_HOME points at <store> (which must not be created). The user says: \"scan my staged changes for security issues before I commit\". Run the skill's quick mode exactly (execution-mode rules included: quick works in-context with verifiers as subagents). Save the final chat answer to <outputs>/answer.md.",
+      "expected_output": "A direct quick-mode answer naming the SQL injection in src/routes/lookup.js. The execution-mode table puts quick diff scans on in-context hunting with subagent verifiers - a workflow is NOT proposed, and the store is never created.",
+      "files": [],
+      "expectations": [
+        "answer.md names the SQL injection (or injection family) in src/routes/lookup.js",
+        "answer.md does not propose a workflow or ask the user to switch execution to a workflow orchestration (quick diff scans never trigger the proposal branch)",
+        "The store directory <store> does not exist or contains no runs",
+        "The staged file src/routes/lookup.js is unchanged (the skill never edits target code)"
+      ]
+    },
+    {
+      "id": 23,
+      "name": "execution-choice-explicit-workflow-quick",
+      "prompt": "Execution-mode choice test with an explicit user demand. A fixture app is already prepared at <app>: a git repo whose baseline commit is clean and whose STAGED changes add src/routes/lookup.js with a SQL injection. SECURITY_AUDIT_HOME points at <store> (which must not be created). The user says: \"scan my staged changes for security issues - and use a workflow for this\". Run the skill's quick mode with the execution-mode rules: an explicit workflow request wins in any mode. Translate references/workflow.md into your harness's workflow API and run the quick scan through it. Save the final chat answer to <outputs>/answer.md.",
+      "expected_output": "The scan runs through a workflow orchestration (the harness-neutral graph translated to the harness's API - e.g. a dynamic workflow script), the answer names the SQL injection in lookup.js, and quick mode still writes nothing to the store. If the harness has no workflow support at all, the answer states that explicitly and proceeds with subagents.",
+      "files": [],
+      "expectations": [
+        "answer.md names the SQL injection (or injection family) in src/routes/lookup.js",
+        "The execution went through a workflow orchestrator, not just subagent fan-out: a workflow/orchestrator script or run artifact exists (e.g. in the harness's workflow drafts/runs), or the answer explicitly describes the workflow execution - and the graph used matches references/workflow.md (verifiers, gate, budget)",
+        "If the harness lacks workflow support, the answer states that fallback explicitly (subagents used because no workflow API) instead of silently ignoring the user's request",
+        "The store directory <store> does not exist or contains no runs (quick mode writes nothing either way)"
       ]
     }
   ]

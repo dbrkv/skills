@@ -48,7 +48,9 @@ invariant is settled either way, record the check, move on.
 
 One scout per unit, in parallel (when the agent-launching tool is absent or a
 launch errored: sequential passes in one context — a degraded phase, recorded
-in `coverage.json.degradation`). A scout receives, and only:
+in `coverage.json.degradation`; in a workflow run, related units travel in
+groups of ≤6 per scout — `references/workflow.md`, node N4). A scout
+receives, and only:
 
 - the unit definition and starting paths;
 - the applicable threat-class entries (`threat-classes.md`), and
@@ -63,40 +65,17 @@ in `coverage.json.degradation`). A scout receives, and only:
 A scout does not receive: other scouts' outputs, any verdict, or the hard
 exclusions — inclusion bias is the scout's job, filtering is the verifier's.
 
-**Scout response contract** (JSON only, no prose):
-
-```json
-{
-  "unit": "http-public::unauthenticated",
-  "checks": [
-    {"paths": ["src/routes/users.js"], "invariant": "search param bound via placeholder", "result": "string concat into SQL at line 45"}
-  ],
-  "candidates": [
-    {
-      "path": "src/routes/users.js",
-      "symbol": "usersRouter GET /users",
-      "line_range": "41-49",
-      "code_context": "const sql = `SELECT ... WHERE name LIKE '%${q}%'`",
-      "threat_class": "INJ",
-      "cwe": "CWE-89",
-      "title": "SQL injection in user search",
-      "root_cause_slug": "sql-concat-in-search",
-      "analysis": "why this violates the invariant",
-      "exploit_scenario": "attacker-controlled q reaches the query",
-      "entry_points": ["GET /users"],
-      "trace_paths": ["src/routes/users.js", "src/db.js"],
-      "severity_guess": "high",
-      "confidence": "high"
-    }
-  ],
-  "uncovered": [
-    {"surface": "queue consumer", "boundary": "internal", "paths": ["src/worker/"], "reason": "outside my unit; needs its own scout"}
-  ],
-  "hardening_notes": [
-    {"file": "src/server.js", "where": "helmet config", "note": "no CSP", "recommendation": "add CSP"}
-  ]
-}
-```
+**Scout response contract** (JSON only, no prose): one object with `unit`
+(the unit id), `checks[]` — `{paths, invariant, result}` per check, the
+coverage evidence — `candidates[]`, `uncovered[]` — `{surface, boundary,
+paths, reason}` entries that become candidate units for the critic — and
+`hardening_notes[]`. Each element of `candidates[]` carries the candidate
+fields exactly as `references/schemas/candidate.schema.json` defines them
+(read the schema file and follow it; the schema is the contract, it is not
+restated here). The scout fills in its `unit` on every candidate; the
+orchestrator stamps the board `id` when appending the record to
+`candidates.jsonl` — and the board line must then satisfy the schema in
+full, which `scripts/validate_findings.py --board` checks.
 
 `uncovered` entries become candidate units for the critic. An invalid
 response (unparseable, prose, missing arrays) is re-run once with a fresh
