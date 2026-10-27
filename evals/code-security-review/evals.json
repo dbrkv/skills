@@ -213,6 +213,22 @@
         "answer.md does not present the products.js concat as a finding (known rejected, unchanged)",
         "The store is untouched: same run count, findings.json byte-identical"
       ]
+    },
+    {
+      "id": 20,
+      "name": "linear-mode-no-subagents",
+      "prompt": "Linear-mode test. The agent-launching (subagent) tool is UNAVAILABLE in this session: treat any launch attempt as an error, retry once at most, and do not work around it by other means. Do not skip isolation to save time - this run specifically tests degradation. Full security audit of the billing service in the input directory (explicit request). Work ON A COPY in a temp dir. Export SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/linear\" for every script call. Follow the full pipeline (phases 0-8) in linear mode and copy the store into <outputs>/store-copy.",
+      "expected_output": "A degraded full snapshot: the critical SQL injection in admin_users.js is NOT rejected (stays confirmed/likely with validated_in_context, or needs_review with reason_code no_independent_verifier), coverage.json lists the degraded phases and finding ids, findings.json degraded is true, and the REPORT header states what ran without isolation and why.",
+      "files": [
+        "files/mixed-real-mitigated"
+      ],
+      "expectations": [
+        "A kind:full snapshot with findings.json exists in the copied store and passes scripts/validate_findings.py",
+        "The CWE-89 finding in src/routes/admin_users.js is NOT rejected: it is confirmed or likely (with validated_in_context: true) or needs_review with reason_code no_independent_verifier",
+        "coverage.json has a degradation object whose phases and/or findings lists are non-empty, and findings.json degraded is true",
+        "REPORT.md header states which phases or findings ran without isolation and why (no subagent tool)",
+        "Any rejected record for the parameterized query in src/routes/products.js carries validated_in_context: true with a provisional severity of medium or low (a lower-severity in-context refutation is allowed)"
+      ]
     }
   ]
 }

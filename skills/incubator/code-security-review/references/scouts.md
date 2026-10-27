@@ -46,8 +46,9 @@ invariant is settled either way, record the check, move on.
 
 ## Scout dispatch
 
-One scout per unit, in parallel (sequential passes in one context when no
-subagents are available; record the degradation). A scout receives, and only:
+One scout per unit, in parallel (when the agent-launching tool is absent or a
+launch errored: sequential passes in one context — a degraded phase, recorded
+in `coverage.json.degradation`). A scout receives, and only:
 
 - the unit definition and starting paths;
 - the applicable threat-class entries (`threat-classes.md`), and

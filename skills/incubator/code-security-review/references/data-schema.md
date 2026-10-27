@@ -100,6 +100,7 @@ safe.
   "exploitability": "easy",
   "existing_mitigations": [],
   "disputed": false,
+  "validated_in_context": false,
   "verifier_reasons": [],
   "owner_assumptions": [],
   "missing_fact": null,
@@ -114,14 +115,18 @@ safe.
 **RejectedRecord** — the same identity core (id, fingerprint,
 previous_fingerprints, title, threat_class, cwe, file, symbol), plus `reason`
 (the refutation), `evidence`, `owner_assumptions`, `verdict_date`, and
-`verdict_source_ref`. **`verdict_date` never changes when a rejected record is
-carried into a newer snapshot** — the 90-day suppression term runs from the
-original verdict.
+`verdict_source_ref`. A rejected record may also carry `severity` — the
+**provisional** severity the candidate entered verification with — and
+`validated_in_context` (see the field rules). **`verdict_date` never changes
+when a rejected record is carried into a newer snapshot** — the 90-day
+suppression term runs from the original verdict.
 
-**FixedRecord** — `{id, fingerprint, title, evidence, recheck_date}`: a
-finding closed as `fixed` in this run. Fixed records are not carried into the
-next snapshot's findings; they remain the trace of when a root cause closed
-and the base for spotting a regression if the same fingerprint returns.
+**FixedRecord** — `{id, fingerprint, title, evidence, recheck_date}`, plus
+`validated_in_context` when the closing recheck verdict was produced
+in-context: a finding closed as `fixed` in this run. Fixed records are not
+carried into the next snapshot's findings; they remain the trace of when a
+root cause closed and the base for spotting a regression if the same
+fingerprint returns.
 
 ### Field rules
 
@@ -146,8 +151,19 @@ and the base for spotting a regression if the same fingerprint returns.
   a branch name or HEAD — a moving ref would suppress rejections forever.
 - A needs_review finding carries a `reason_code`: `missing_fact` (the
   verifier's unresolved fact — `missing_fact` is then required and
-  non-empty), `validator_output_invalid`, or `not_validated` (the verifier
-  cap) — the latter two carry `missing_fact: null`.
+  non-empty), `validator_output_invalid`, `not_validated` (the verifier
+  cap), or `no_independent_verifier` (linear mode or a verifier launch that
+  failed twice — see `verification.md`) — the latter three carry
+  `missing_fact: null`.
+- `validated_in_context: true` marks a record whose verdict was produced in
+  the orchestrator's context (linear mode, or a re-run after a verifier
+  failed) instead of by an isolated verifier; the id is listed in
+  `coverage.json.degradation.findings`. A rejected record resting on an
+  in-context verdict must carry a provisional `severity` of medium or low —
+  a high/critical candidate is never refuted in-context
+  (`verification.md`, Linear mode). The flag is provenance and survives
+  verbatim carry into later snapshots; it does not by itself make later
+  runs degraded.
 - `owner_assumptions` lists the user-supplied or deployment facts a verdict
   rests on; REPORT.md renders them in a dedicated section.
 - `last_recheck` is `{run_id, date, result}` with result `still_open` |
@@ -168,6 +184,10 @@ and the base for spotting a regression if the same fingerprint returns.
   "scope_exclusions": [
     {"path": ".agents/", "reason": "agent/skill tooling, not the target's code"}
   ],
+  "degradation": {
+    "phases": [],
+    "findings": []
+  },
   "units": [
     {
       "id": "http-public::unauthenticated",
@@ -198,6 +218,17 @@ lists the tool directories and files (`.agents/`, `.claude/`, `.cursor/`,
 `skills-lock.json`, ...) excluded from the scope in Phase 0 — each with a
 reason, so "not scanned" is always stated, never silent.
 
+`degradation` records exactly what ran without isolation:
+`phases` is a subset of `recon` / `scouts` / `critic` / `verification` /
+`reviewer` — the fan-out phases that ran as sequential passes in one context;
+`findings` lists the ids whose verifiers failed or produced their verdict
+in-context. Partial degradation (3 of 8 verifiers failed) is recorded the
+same way, not as a global flag. Both lists empty in a fully isolated run.
+The findings.json `degraded` flag mirrors this object: true when either list
+is non-empty. A recheck snapshot has no coverage.json of its own — it
+references the base full snapshot's; in-context recheck verdicts are marked
+on the records (`validated_in_context`) and in the recheck REPORT header.
+
 ## threat-model.md and REPORT.md
 
 Their shapes are defined in `recon.md` (the model template and its diff
@@ -227,10 +258,17 @@ needs_review or is missing on confirmed/likely; `source_ref` or a
 `verdict_source_ref` is not a commit hex (7–40); a needs_review lacks a known
 `reason_code`, or `missing_fact` is non-empty exactly when `reason_code` is
 not `missing_fact`; a rejected record lacks `verdict_date` or `reason`; a
-fixed record lacks fingerprint, title, evidence, or `recheck_date`; a recheck
-kind lacks a resolving `base_run` (it must point at a full snapshot); the
-summary counts disagree with the arrays (including `fixed` and `rechecked`);
-or `by_severity` does not sum to confirmed + likely. With `--board
+rejected record marked `validated_in_context` lacks a provisional `severity`
+or sits above medium (a high/critical candidate is never refuted
+in-context); a fixed record lacks fingerprint, title, evidence, or
+`recheck_date`; a recheck kind lacks a resolving `base_run` (it must point at
+a full snapshot); the summary counts disagree with the arrays (including
+`fixed` and `rechecked`); or `by_severity` does not sum to confirmed +
+likely. When a sibling `coverage.json` exists in the run directory (full
+snapshots), it also checks degradation accounting: `phases` holds only the
+five known phase tokens, every id in `degradation.findings` resolves to a
+record in this snapshot, and the findings.json `degraded` flag is true
+exactly when either degradation list is non-empty. With `--board
 candidates.jsonl`, it additionally fails when any board candidate id is not
 accounted for in a finding's or rejected record's `merged_from` or a
 suppressed entry's `candidates` — no candidate may vanish between the board

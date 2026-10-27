@@ -36,8 +36,10 @@ The storage root is `~/security-audit/` unless `SECURITY_AUDIT_HOME` is set
 
 ## Phase 1 — Recon
 
-Launch 2–3 recon agents in parallel (sequential passes in one context when
-subagents are unavailable — record `degraded: true` for the snapshot). They
+Launch 2–3 recon agents in parallel (when the agent-launching tool is absent
+or a launch errored: sequential passes in one context — a degraded phase,
+recorded in `coverage.json.degradation`; linear-mode rules in
+`verification.md`). They
 read the target and return structured facts with file:line references; they
 write nothing and never execute target code.
 

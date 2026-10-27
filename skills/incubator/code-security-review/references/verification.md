@@ -7,8 +7,9 @@ honest.
 
 ## Phase 5 — The verifier pool
 
-One verifier per deduped root cause, in parallel (sequential passes in one
-context without subagents; record `degraded: true`). Each verifier context
+One verifier per deduped root cause, in parallel. When the agent-launching
+tool is absent or a launch attempt errored, Phase 5 runs as sequential passes
+in one context under the linear-mode rules below. Each verifier context
 contains, and only:
 
 - the single finding or candidate, with its trace and evidence;
@@ -105,6 +106,12 @@ H-id). One candidate, one bucket.
 a fresh verifier; a second failure → `needs_review` with
 `reason_code: "validator_output_invalid"` and `missing_fact: null`.
 
+**Failed launch** (the agent-launching tool is missing, or the call returned
+an error): same retry — once with a fresh verifier; a second failure →
+`needs_review` with `reason_code: "no_independent_verifier"` and
+`missing_fact: null`, and the id lands in `coverage.json.degradation.findings`.
+A failed launch is not an invalid output: no verdict was produced at all.
+
 **Verifier cap.** More than 20 root causes after dedup → verify in
 `severity_guess` descending order (ties broken by confidence, then file
 path); every remaining candidate becomes `needs_review` with
@@ -128,6 +135,44 @@ Agreement → the verdict stands. Disagreement → for (1) the finding stays
 open: status `likely` or `needs_review`; for (2) the result is `still_open`;
 in both cases `disputed: true`, `verifier_reasons` holds both justifications
 verbatim, and the report shows the disagreement.
+
+### Linear mode (no subagents)
+
+Allowed **only** when the agent-launching tool is absent from the environment
+or a launch attempt returned an error — never to save time or tokens. Every
+fan-out phase (recon, scouts, critic, verification, reviewer) then runs as
+sequential passes in one context under the same contracts.
+
+A verdict produced in the orchestrator's context is not independent — the
+refuter has already seen everything the finder saw. The second-verifier rule
+therefore cannot run at all in one context, and exactly that freezes its two
+consequential paths:
+
+1. A candidate whose provisional severity (the scout's `severity_guess`, or
+   the dedup's estimate) is high or critical is **never rejected** in-context.
+   It stays open as `needs_review` with `reason_code:
+   "no_independent_verifier"`, `missing_fact: null`. Confirming or holding it
+   open is allowed; only the rejection is frozen.
+2. A high/critical finding is **never closed** as `fixed` or `fixed_pending`
+   in-context — in the Phase 1 recheck pass and in recheck mode alike. The
+   recheck result is `still_open`, or `cant_tell` when the deciding fact is
+   not source-visible, and the recheck `reason` names
+   `no_independent_verifier`. Only isolated verifiers agreeing can close it.
+
+Refuting medium/low candidates in-context is allowed. **Every verdict produced
+in-context** — refutation, confirmation, or recheck update — is marked
+`validated_in_context: true` on its record, and the finding's id is listed in
+`coverage.json.degradation.findings` (its `reason` or the report says the
+verdict is in-context). A rejected medium/low record keeps the provisional
+`severity` it entered verification with — the schema uses it to keep
+high/critical refutations out of the in-context path.
+
+Accounting: `coverage.json.degradation` names the degraded phases
+(`recon` / `scouts` / `critic` / `verification` / `reviewer`) and every finding
+id whose verifier failed or ran in-context — partial degradation (3 of 8
+verifiers failed) is recorded the same way. The findings.json `degraded` flag
+is true when either list is non-empty. The REPORT header lists what was
+verified without isolation and why.
 
 ### The recheck contract (Phase 1 recheck pass and recheck mode)
 
@@ -175,7 +220,9 @@ and are sent only for `still_open` and `moved` (`fingerprint` only for
 `previous_fingerprints[]`). `fixed` and `fixed_pending` require evidence
 citing the blocking code. `cant_tell` names the missing fact in `reason`. A
 high/critical `fixed`/`fixed_pending` passes the second-verifier rule above
-before it takes effect.
+before it takes effect; in linear mode it never takes effect at all — the
+result is `still_open` or `cant_tell` with `reason` naming
+`no_independent_verifier` (Linear mode, rule 2).
 
 ## Phase 6 — Ranking
 
@@ -193,8 +240,11 @@ the reason names the impact that bounded it.
 
 REPORT.md structure (file contract: `data-schema.md`):
 
-1. **Header** — run id, kind, date, scope, source_ref, dirty; a degradation
-   line when phases ran sequentially; the coverage line ("X of Y units
+1. **Header** — run id, kind, date, scope, source_ref, dirty; the degradation
+   section: which phases and finding ids ran without isolation (from
+   `coverage.json.degradation`) and why — the agent-launching tool was
+   unavailable or verifiers failed — plus, per record, which verdicts are
+   `validated_in_context`; the coverage line ("X of Y units
    checked, Z blocked, G open gaps"); and, when anything is uncovered or
    blocked, an explicit "partial coverage" statement. A report without
    coverage proof never calls the code clean.
@@ -202,8 +252,9 @@ REPORT.md structure (file contract: `data-schema.md`):
 3. **Rechecked findings** — the still_open / fixed / moved / cant_tell table.
 4. **Findings** — confirmed then likely, severity-descending: severity,
    title, `file:symbol`, status; disputed marked; needs_review grouped by
-   missing fact vs. not-validated reasons (invalid output, verifier cap —
-   with "say 'validate all' to verify the rest" when the cap applied).
+   missing fact vs. not-validated reasons (invalid output, verifier cap, no
+   independent verifier — with "say 'validate all' to verify the rest" when
+   the cap applied).
 5. **Rejected** — one line each, with the refuting reason.
 6. **Assumptions behind rejections** — every `owner_assumptions[]` entry; the
    section is always present (state "none" when empty).
@@ -229,7 +280,9 @@ Phase 5.
    needs_review). Rejected records are re-raised only when their trace
    changed or the verdict is 90 days old or older.
 3. Run Phase 5 verifiers over the selection (second-verifier rule included:
-   a high/critical finding closes as fixed only on two agreeing verifiers).
+   a high/critical finding closes as fixed only on two agreeing verifiers;
+   in linear mode it never closes — `still_open` or `cant_tell` with reason
+   `no_independent_verifier`).
    User words accompanying the request are attached to the relevant finding
    as evidence to check. The verdicts use the recheck contract above.
 4. Write a `kind: recheck` snapshot: `findings.json` holds the base

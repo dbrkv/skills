@@ -18,8 +18,10 @@ KINDS = {"full", "recheck"}
 STATUSES = {"confirmed", "likely", "needs_review"}
 SEVERITIES = {"critical", "high", "medium", "low"}
 STRIDES = {"Spoofing", "Tampering", "Repudiation", "InfoDisclosure", "DoS", "ElevationOfPrivilege"}
-REASON_CODES = {"missing_fact", "validator_output_invalid", "not_validated"}
+REASON_CODES = {"missing_fact", "validator_output_invalid", "not_validated",
+                "no_independent_verifier"}
 RECHECK_RESULTS = {"still_open", "fixed", "fixed_pending", "moved", "cant_tell"}
+DEGRADED_PHASES = {"recon", "scouts", "critic", "verification", "reviewer"}
 ID_RE = re.compile(r"^F-\d{4,}$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 HEX_REF_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
@@ -130,6 +132,12 @@ def validate(data: dict, path: Path) -> list:
             err(f"{where}: rejected requires verdict_date (YYYY-MM-DD), got {rec.get('verdict_date')!r}")
         if not rec.get("reason"):
             err(f"{where}: rejected requires a reason")
+        if rec.get("validated_in_context"):
+            sev = rec.get("severity")
+            if sev not in ("medium", "low"):
+                err(f"{where}: a rejected record resting on an in-context verdict "
+                    f"requires a provisional severity of medium or low, got {sev!r} "
+                    "(a high/critical candidate is never refuted in-context)")
 
     for i, rec in enumerate(fixed):
         fid = rec.get("id", "?")
@@ -199,6 +207,56 @@ def validate(data: dict, path: Path) -> list:
         if re_summary.get(result, 0) != want:
             err(f"summary.rechecked.{result}={re_summary.get(result)!r} but the arrays hold {want}")
 
+    # Degradation accounting against the sibling coverage.json (a full run
+    # writes one; a recheck references the base full snapshot's).
+    coverage_file = path.parent / "coverage.json"
+    if coverage_file.is_file():
+        errs += validate_coverage(coverage_file, data)
+
+    return errs
+
+
+def validate_coverage(coverage_path: Path, data: dict) -> list:
+    """Degradation accounting: phases are known tokens, every listed finding
+    id resolves in this snapshot, and the findings.json `degraded` flag is
+    true exactly when either degradation list is non-empty."""
+    errs = []
+    try:
+        cov = json.loads(coverage_path.read_text())
+    except (json.JSONDecodeError, OSError) as e:
+        return [f"coverage.json: unreadable ({e})"]
+    if not isinstance(cov, dict):
+        return ["coverage.json: not an object"]
+    deg = cov.get("degradation") or {}
+    if not isinstance(deg, dict):
+        return ["coverage.json: degradation must be an object"]
+    phases = deg.get("phases", [])
+    fids = deg.get("findings", [])
+    if not isinstance(phases, list):
+        errs.append("coverage.json: degradation.phases must be a list")
+        phases = []
+    if not isinstance(fids, list):
+        errs.append("coverage.json: degradation.findings must be a list")
+        fids = []
+    for p in phases:
+        if p not in DEGRADED_PHASES:
+            errs.append(f"coverage.json: unknown degradation phase {p!r} "
+                        f"(known: {sorted(DEGRADED_PHASES)})")
+    recs = []
+    for key in ("findings", "rejected", "fixed"):
+        v = data.get(key)
+        if isinstance(v, list):
+            recs.extend(r for r in v if isinstance(r, dict))
+    known_ids = {r.get("id") for r in recs}
+    for fid in fids:
+        if fid not in known_ids:
+            errs.append(f"coverage.json: degradation.findings id {fid!r} "
+                        "does not resolve in this snapshot")
+    degraded = bool(data.get("degraded"))
+    if degraded != bool(phases or fids):
+        state = "non-empty" if (phases or fids) else "empty"
+        errs.append(f"degraded={degraded} but coverage.json degradation lists are {state}: "
+                    "the flag is true exactly when either list is non-empty")
     return errs
 
 

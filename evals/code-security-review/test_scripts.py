@@ -88,6 +88,7 @@ def finding(**over) -> dict:
         "exploitability": "easy",
         "existing_mitigations": [],
         "disputed": False,
+        "validated_in_context": False,
         "verifier_reasons": [],
         "owner_assumptions": [],
         "missing_fact": None,
@@ -527,6 +528,81 @@ class ValidatorTests(unittest.TestCase):
         ok = finding(id="F-0011", status="needs_review", severity=None,
                      reason_code="not_validated", missing_fact=None)
         self.assertEqual(self.validate(snapshot_doc(findings=[ok])), [])
+        linear = finding(id="F-0012", status="needs_review", severity=None,
+                         reason_code="no_independent_verifier", missing_fact=None)
+        self.assertEqual(self.validate(snapshot_doc(findings=[linear])), [])
+        linear_fact = finding(id="F-0013", status="needs_review", severity=None,
+                              reason_code="no_independent_verifier",
+                              missing_fact="should be null")
+        errs = self.validate(snapshot_doc(findings=[linear_fact]))
+        self.assertTrue(any("missing_fact must be non-empty exactly when" in e for e in errs))
+
+    def test_validated_in_context_rules(self):
+        # findings may carry the flag freely (confirmed high in-context is allowed)
+        ok = finding(id="F-0020", validated_in_context=True)
+        self.assertEqual(self.validate(snapshot_doc(findings=[ok])), [])
+        # a rejected medium refuted in-context is fine
+        rej_ok = rejected(validated_in_context=True, severity="medium")
+        self.assertEqual(self.validate(snapshot_doc(rej=[rej_ok])), [])
+        # a rejected high/critical refuted in-context is never valid
+        rej_high = rejected(id="F-0003", validated_in_context=True, severity="high")
+        errs = self.validate(snapshot_doc(rej=[rej_high]))
+        self.assertTrue(any("in-context verdict" in e for e in errs))
+        rej_crit = rejected(id="F-0003", validated_in_context=True, severity="critical")
+        errs = self.validate(snapshot_doc(rej=[rej_crit]))
+        self.assertTrue(any("in-context verdict" in e for e in errs))
+        # without a provisional severity the in-context refutation is unverifiable
+        rej_nosev = rejected(id="F-0003", validated_in_context=True)
+        errs = self.validate(snapshot_doc(rej=[rej_nosev]))
+        self.assertTrue(any("in-context verdict" in e for e in errs))
+        # isolated refutations carry no flag and may hold any severity
+        rej_iso = rejected(id="F-0003", severity="critical")
+        self.assertEqual(self.validate(snapshot_doc(rej=[rej_iso])), [])
+
+    def test_coverage_degradation_accounting(self):
+        run = self.base / "runs" / "2026-10-27-1"
+        run.mkdir(parents=True, exist_ok=True)
+
+        def with_coverage(coverage, doc):
+            (run / "coverage.json").write_text(json.dumps(coverage))
+            return self.validate(doc)
+
+        deg = {"phases": ["verification"], "findings": ["F-0001"]}
+        ok_doc = snapshot_doc(findings=[finding(validated_in_context=True)])
+        ok_doc["degraded"] = True
+        self.assertEqual(with_coverage({"degradation": deg}, ok_doc), [])
+
+        # flag must mirror the lists exactly
+        flag_off = snapshot_doc(findings=[finding()])
+        errs = with_coverage({"degradation": deg}, flag_off)
+        self.assertTrue(any("degraded=False" in e or "degraded=False but" in e for e in errs))
+        flag_on = snapshot_doc()
+        flag_on["degraded"] = True
+        errs = with_coverage({"degradation": {"phases": [], "findings": []}}, flag_on)
+        self.assertTrue(any("degraded=True" in e for e in errs))
+
+        # unknown phase token
+        errs = with_coverage({"degradation": {"phases": ["scouting"], "findings": []}},
+                             snapshot_doc())
+        self.assertTrue(any("unknown degradation phase" in e for e in errs))
+        # dangling finding id
+        errs = with_coverage({"degradation": {"phases": [], "findings": ["F-0099"]}},
+                             snapshot_doc())
+        self.assertTrue(any("does not resolve" in e for e in errs))
+        # a fixed record also resolves (in-context fixed on a medium)
+        fx = {"id": "F-0009", "fingerprint": "src/x.js::f::y", "title": "closed",
+              "evidence": [{"file": "src/x.js", "line": 1, "note": "control added"}],
+              "recheck_date": "2026-10-27", "validated_in_context": True}
+        doc = snapshot_doc(fixed=[fx])
+        doc["degraded"] = True
+        self.assertEqual(with_coverage({"degradation": {"phases": ["verification"],
+                                                        "findings": ["F-0009"]}}, doc), [])
+
+    def test_no_coverage_file_skips_degradation_check(self):
+        # no sibling coverage.json (recheck snapshots): flag checks are skipped
+        doc = snapshot_doc()
+        doc["degraded"] = True
+        self.assertEqual(self.validate(doc), [])
 
     def test_rejected_needs_verdict_date(self):
         r = rejected(verdict_date=None)

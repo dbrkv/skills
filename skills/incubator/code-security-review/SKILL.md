@@ -16,7 +16,7 @@ description: |
   Do NOT trigger to explain security concepts, write security documentation,
   or configure scanners or CI (gitleaks, semgrep, Snyk, Dependabot).
 metadata:
-  version: "2.0.0"
+  version: "2.1.0"
   user-invocable: "true"
 ---
 
@@ -43,8 +43,10 @@ candidates (`references/scouts.md`), refute each one
 run. Quick reads (never writes) the latest snapshot when one exists: known
 findings are reported as "known F-NNNN", and a rejected record whose trace
 code is unchanged is not re-raised. With subagents available, quick gives each
-surviving candidate one isolated verifier; without them it refutes in-context
-and says so ("validated in-context").
+surviving candidate one isolated verifier; in linear mode (no subagents) quick
+refutes in-context under the same linear-mode rules as a full run — a
+high/critical candidate is never rejected there — marks every in-context
+verdict, and says so in the answer.
 
 Recheck loads the latest snapshot and runs only Phase 5 verifiers over the
 findings the user named, or over all open ones, then writes a `kind: recheck`
@@ -89,7 +91,7 @@ it.
 | Phase | What happens | Reference |
 |-------|--------------|-----------|
 | 0 Preparation | Resolve scope, compute repo-id, read the latest snapshot (open findings, rejected records, gaps, previous threat model), print a short plan | `references/recon.md` |
-| 1 Recon | 2–3 parallel agents map architecture, principals and controls, entry surfaces → a fresh STRIDE threat model + diff vs the previous one. In parallel: open findings from the last run are rechecked (still_open / fixed / fixed_pending / moved / cant_tell; a high/critical finding closes as fixed only when a second verifier agrees), and rejected records are carried verbatim or re-verified per `trace-changed` and the 90-day term | `references/recon.md` |
+| 1 Recon | 2–3 parallel agents map architecture, principals and controls, entry surfaces → a fresh STRIDE threat model + diff vs the previous one. In parallel: open findings from the last run are rechecked (still_open / fixed / fixed_pending / moved / cant_tell; a high/critical finding closes as fixed only when a second verifier agrees; in linear mode it never closes in-context), and rejected records are carried verbatim or re-verified per `trace-changed` and the 90-day term | `references/recon.md` |
 | 2 Scouts | One scout per surface × trust boundary hunts from invariants; candidates land on a JSONL board written only by the orchestrator. Each scout gets R1–R10, its threat classes, and the known-findings list (ids + titles only) | `references/scouts.md` |
 | 3 Coverage critic | A fresh agent names what went unchecked by surface and STRIDE category → one bounded follow-up scout wave; what remains open lands in the gap list | `references/scouts.md` |
 | 4 Dedup | Candidates merge by root cause before verification: one shared-helper cause with several entry points is one finding | `references/scouts.md` |
@@ -99,10 +101,31 @@ it.
 | 8 Snapshot | Write threat-model.md, findings.json, coverage.json, REPORT.md into the run dir, then validate — it must print OK before the report is issued: `python3 scripts/validate_findings.py <run>/findings.json --board <run>/candidates.jsonl --prev <latest-run-dir>` (omit `--prev` on the first run — no snapshots yet). A validator error means the snapshot is not ready: fix and re-validate | `references/data-schema.md` |
 
 When subagents are unavailable, every fan-out phase degrades to sequential
-passes in one context under the same contracts, and the snapshot records the
-degradation. Every REPORT.md states in its header what was not covered (from
-`coverage.json`), any degraded execution, and the owner assumptions rejections
-rest on; without coverage proof a report never calls the code clean.
+passes in one context under the same contracts. Linear mode is allowed **only**
+when the agent-launching tool is absent from the environment or a launch
+attempt returned an error (retry once; a second failure degrades that
+finding) — saving time or tokens is never a reason to skip isolation.
+
+In one context no verdict is independent, so:
+
+- a candidate whose provisional severity is high/critical is **never
+  rejected** in-context — it stays open as `needs_review` with
+  `reason_code: "no_independent_verifier"`;
+- a high/critical finding is **never closed** as `fixed` / `fixed_pending`
+  in-context — the recheck result is `still_open` (or `cant_tell`) with the
+  same reason; closing it still requires isolated verifiers;
+- refuting medium/low candidates in-context is allowed; **every verdict
+  produced in-context** — refutation, confirmation, or recheck — is marked
+  `validated_in_context: true` on the record.
+
+The snapshot records exactly what ran without isolation:
+`coverage.json.degradation` lists the degraded phases
+(`recon`/`scouts`/`critic`/`verification`/`reviewer`) and the ids of findings
+whose verifiers failed or ran in-context; the findings.json `degraded` flag is
+true when either list is non-empty. Every REPORT.md header states what was
+verified without isolation and why, alongside what was not covered (from
+`coverage.json`) and the owner assumptions rejections rest on; without
+coverage proof a report never calls the code clean.
 
 ## Scopes
 
