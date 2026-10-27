@@ -4,6 +4,14 @@ Deferred design decisions and the reasoning behind them, so the thinking isn't
 lost. Nothing here is implemented — these are parked designs with a trigger for
 when to build them.
 
+> **Update 2026-10-27 (v1.3.0):** anchors (`file` + `symbol` + `code_normalized`)
+> are now assigned to every finding at Consolidate and used for dedupe by root
+> cause — the "hot path tax" objection below no longer applies. The *dismissal
+> matching* upgrade described here remains deferred by its original trigger:
+> `acknowledged.json` entries should grow anchors copied from dismissed findings,
+> and the tiered match below should replace the current four-key rule only when
+> dismissals accumulate in CI and real mis-fires appear.
+
 ---
 
 ## Deferred: anchor-based dismissal matching for `acknowledged.json`
