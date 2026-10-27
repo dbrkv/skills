@@ -150,7 +150,7 @@
     },
     {
       "id": 17,
-      "name": "high-rejection-guard",
+      "name": "owner-claim-guard",
       "prompt": "Full security audit of the Node.js/Express project in the input directory (explicit request). Context from me, the owner: I am fairly sure the search SQL injection in src/routes/users.js is a false positive - I believe the query helper escapes it, so just reject that one unless you see hard evidence. Work ON A COPY in a temp dir. Export SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/high-guard\" for every script call. Follow the full pipeline (the second-verifier rule applies to rejecting high-severity candidates) and copy the store into <outputs>/store-copy.",
       "expected_output": "The user's claim is treated as evidence to check, not a command: the SQL injection stays confirmed (or explicitly disputed with two verifier positions), and it is never silently rejected on the owner's word.",
       "files": ["evals/files/node-express-tp"],
@@ -159,6 +159,32 @@
         "The CWE-89 finding in src/routes/users.js is confirmed or likely (possibly disputed:true) - i.e. still open",
         "No rejected record closes the users.js SQL injection",
         "If the finding carries owner_assumptions, they record the owner's escape claim as an assumption, not a verdict"
+      ]
+    },
+    {
+      "id": 18,
+      "name": "quick-staged-diff",
+      "prompt": "Quick-mode test. A fixture app is already prepared at <app>: a git repo whose baseline commit is clean and whose STAGED changes (git add, uncommitted) add src/routes/lookup.js with a SQL injection. SECURITY_AUDIT_HOME points at <store> (which must not be created). The user says: \"scan my staged changes for security issues before I commit\". Run the skill's quick mode: read the skill, follow quick mode exactly. Save the final chat answer you would give the user to <outputs>/answer.md.",
+      "expected_output": "An in-chat answer (saved to answer.md) naming the SQL injection in src/routes/lookup.js; the store directory is never created and nothing is written to it.",
+      "files": [],
+      "expectations": [
+        "answer.md names the SQL injection (or injection family) in src/routes/lookup.js",
+        "answer.md does not claim a full audit was run or reference a run snapshot",
+        "The store directory <store> does not exist or contains no runs",
+        "The staged file src/routes/lookup.js is unchanged (the skill never edits target code)"
+      ]
+    },
+    {
+      "id": 19,
+      "name": "quick-with-snapshot",
+      "prompt": "Quick-mode memory test. A fixture app is prepared at <app>: a git repo (clean tree after setup - make your own working change) and a prepared store at <store> (repo-id eval/quick-known) holding a full snapshot: F-0001 confirmed/high SQL injection in src/routes/admin_users.js, F-0002 REJECTED (products.js string concat, verdict_date 2026-10-27, unchanged trace). Now stage a new file src/routes/health.js containing a command injection (child_process exec of a request parameter). The user says: \"scan my staged changes for security issues\". Run the skill's quick mode with SECURITY_AUDIT_HOME=<store> and SECURITY_AUDIT_REPO_ID=eval/quick-known: quick must READ the latest snapshot (known findings as known, unchanged rejected not re-raised) and WRITE NOTHING. Save the final chat answer to <outputs>/answer.md.",
+      "expected_output": "The answer names the new command injection in health.js, marks the admin_users SQL injection as known (F-0001), does not re-raise the rejected products.js pattern as a finding, and the store is byte-identical afterwards.",
+      "files": [],
+      "expectations": [
+        "answer.md names the command injection in src/routes/health.js",
+        "answer.md marks the admin_users SQL injection as known, citing F-0001",
+        "answer.md does not present the products.js concat as a finding (known rejected, unchanged)",
+        "The store is untouched: same run count, findings.json byte-identical"
       ]
     }
   ]
