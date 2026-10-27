@@ -74,13 +74,28 @@ carries its `missing_fact` (the orchestrator-assigned
 verdict rests on ("the endpoint is internal-only") — a later run re-checks
 these first.
 
-**Methodology.** (1) *Reachability* — can an outsider reach the path:
-external / authenticated / internal / unreachable. (2) *Control flow* — trace
+**Methodology.** (1) *Reachability* — trace the entry surface to the path and
+classify: external / authenticated / internal / unreachable. A service is
+reachable by the principals it is built for: an HTTP server is built for
+network clients, a CLI for the users who run it. Treat "internal-only" as
+unproven unless the repository proves it (bound to localhost, a network
+policy in the repo) or the owner states it (record it in
+`owner_assumptions`) — never send a finding to needs_review asking whether
+the port is reachable. (2) *Control flow* — trace
 the tainted source through every transformation to the sink; "user input"
 that is actually server-controlled (e.g. taken from a signed token) is
 usually a rejection. (3) *Mitigations* — validation on the path, framework
 defaults actually enabled, middleware, the threat model's claims; verify each
 in the code. (4) *Exploitability* — easy / medium / hard / not_exploitable.
+
+**Deployment-control candidates are hardening notes.** When the only deciding
+fact of a candidate is a control customarily configured outside the
+repository — TLS termination, response headers, NODE_ENV, umask, disk or
+backup encryption — the orchestrator records it as a hardening note in
+`coverage.json` with the R9 fact stated, never as a needs_review finding.
+needs_review is for a real code defect whose exploitability hinges on exactly
+one fact; "the code lacks a control the platform usually supplies" is not a
+defect.
 
 **Invalid output** (unparseable, prose, contract violation): re-run once with
 a fresh verifier; a second failure → `needs_review` with
@@ -160,8 +175,13 @@ before it takes effect.
 
 ## Phase 6 — Ranking
 
-Severity comes from the impact anchors in SKILL.md; a verifier's severity
-survives unless it exceeds the demonstrated impact. Only confirmed and likely
+Severity comes from the impact anchors in SKILL.md. **Demonstrated** means
+established by a complete source-level trace from an attacker-controlled
+source to the sink — the skill never executes the target, and a complete
+trace is demonstration enough for the anchors. Apply them to what the trace
+proves: an unauthenticated injection that reads arbitrary tables anchors at
+critical (full data-store access), not high. A verifier's severity survives
+unless it exceeds the demonstrated impact. Only confirmed and likely
 findings carry severity; needs_review never does. When severity is lowered,
 the reason names the impact that bounded it.
 

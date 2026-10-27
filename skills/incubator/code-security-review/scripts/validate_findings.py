@@ -202,17 +202,62 @@ def validate(data: dict, path: Path) -> list:
     return errs
 
 
+def validate_board(board_path: Path, data: dict) -> list:
+    """Every candidate on the board maps to a bucket: a finding's or rejected
+    record's merged_from, or a suppressed entry's candidates. None vanish."""
+    errs = []
+    board_ids = set()
+    try:
+        for line in board_path.read_text().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            rec = json.loads(line)
+            cid = rec.get("id") or rec.get("local_id") or rec.get("candidate_id")
+            if cid:
+                board_ids.add(str(cid))
+    except (OSError, ValueError) as e:
+        return [f"board {board_path.name}: unreadable ({e})"]
+    if not board_ids:
+        return ["board holds no candidate ids"]
+    covered = set()
+    for rec in data.get("findings", []) + data.get("rejected", []):
+        covered.update(str(c) for c in rec.get("merged_from", []))
+    for s in data.get("suppressed", []):
+        covered.update(str(c) for c in s.get("candidates", []))
+    lost = sorted(board_ids - covered)
+    for cid in lost:
+        errs.append(f"board candidate {cid} is not accounted for "
+                    "(finding/rejected merged_from, suppressed candidates)")
+    return errs
+
+
 def main(argv):
-    if len(argv) != 2:
-        print("usage: validate_findings.py PATH", file=sys.stderr)
+    board = None
+    rest = []
+    i = 1
+    while i < len(argv):
+        if argv[i] == "--board":
+            if i + 1 >= len(argv):
+                print("usage: validate_findings.py PATH [--board candidates.jsonl]", file=sys.stderr)
+                return 2
+            board = Path(argv[i + 1])
+            i += 2
+        else:
+            rest.append(argv[i])
+            i += 1
+    if len(rest) != 1:
+        print("usage: validate_findings.py PATH [--board candidates.jsonl]", file=sys.stderr)
         return 2
-    path = Path(argv[1])
+    path = Path(rest[0])
     try:
         data = json.loads(path.read_text())
     except (json.JSONDecodeError, OSError) as e:
         print(f"ERROR: {e}")
         return 1
     errs = validate(data, path)
+    if board is not None:
+        errs += validate_board(board, data)
     if errs:
         for e in errs:
             print(f"ERROR: {e}")

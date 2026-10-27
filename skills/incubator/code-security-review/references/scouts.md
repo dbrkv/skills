@@ -132,7 +132,11 @@ Before verification, merge the board:
 
 1. **Merge duplicates.** Same `cwe` + same root cause (same path + symbol +
    slug, or one shared helper reachable from several entry points) → one
-   finding; union `entry_points` and `trace_paths`; keep the fullest trace.
+   finding; union `entry_points` and `trace_paths`; keep the fullest trace;
+   record every merged candidate's board id on the surviving finding's
+   `merged_from[]`. **A duplicate of another root cause is a merge, never a
+   rejection and never a suppression** — it must not appear in `rejected` or
+   `suppressed`.
 2. **Match against the latest snapshot** (an LLM step — the script never
    matches). The dedup receives every known record as id + fingerprint +
    title:

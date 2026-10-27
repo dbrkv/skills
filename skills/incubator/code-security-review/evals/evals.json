@@ -13,7 +13,8 @@
         "findings.json contains a confirmed CWE-798 finding in src/config.js",
         "findings.json contains a confirmed CWE-79 finding in src/routes/notes.js",
         "REPORT.md is non-empty and its header states coverage",
-        "threat-model.md exists and covers the six STRIDE categories"
+        "threat-model.md exists and covers the six STRIDE categories",
+        "Deployment-control candidates (NODE_ENV, host permissions, backups, stack traces) appear as hardening notes in coverage.json, not as needs_review findings"
       ]
     },
     {
@@ -48,11 +49,13 @@
       "id": 4,
       "name": "mixed-real-and-mitigated",
       "prompt": "Full security audit of the billing service in the input directory (explicit request) - validate each finding so I know what is real. Work ON A COPY in a temp dir. Export SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/mixed\" for every script call. Follow the full pipeline and copy the store into <outputs>/store-copy.",
-      "expected_output": "The real SQL injection in admin_users.js is confirmed; the parameterized query in products.js is not.",
+      "expected_output": "The real SQL injection in admin_users.js is confirmed at critical severity (unauthenticated arbitrary-table read); missing authentication is confirmed; deployment-control candidates (NODE_ENV, stack traces) become hardening notes, not needs_review findings; the parameterized query in products.js is not flagged.",
       "files": ["evals/files/mixed-real-mitigated"],
       "expectations": [
         "A kind:full snapshot with findings.json exists in the copied store and passes scripts/validate_findings.py",
-        "A confirmed CWE-89 finding is located in src/routes/admin_users.js",
+        "The CWE-89 finding in src/routes/admin_users.js is confirmed with severity critical",
+        "The missing-authentication finding (CWE-306) is confirmed - service exposure is not an R9 fact",
+        "Deployment-control candidates (NODE_ENV, stack traces, proxy, headers) appear as hardening notes in coverage.json, not as needs_review findings",
         "The parameterized query in src/routes/products.js is not a confirmed finding",
         "REPORT.md is non-empty"
       ]
@@ -104,7 +107,7 @@
       "files": ["evals/files/php-legacy"],
       "expectations": [
         "A confirmed CWE-89 finding exists",
-        "A CWE-502 finding exists with status confirmed OR likely, and its reason/missing_fact names the unverifiable condition (the POP gadget chain) - the fixture has no classes with magic methods, so likely is the correct verdict"
+        "A CWE-502 finding exists with status confirmed OR likely, and its reason/missing_fact names the unverifiable condition (the POP gadget chain) - the fixture has no classes with magic methods, so likely is the correct verdict",
         "A confirmed file-inclusion finding exists (CWE-98 or an injection-family finding on the include path)",
         "A confirmed finding covers the loose hash comparison (CWE-697 or an AUTHN-class finding on the login check)"
       ]

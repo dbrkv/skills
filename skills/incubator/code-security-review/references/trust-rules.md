@@ -33,8 +33,17 @@ where no rule contradicts it.**
 - **R8.** Comparisons that rely on implicit type coercion or normalization
   inside a security decision are suspicious.
 - **R9.** Controls outside the repository (proxies, CDNs, cloud policies,
-  platform settings) are neither present nor absent. If the deciding fact lies
-  outside the repository, the verdict is needs_review naming that fact.
+  platform settings) are neither present nor absent. R9 governs *controls*,
+  never *exposure*: a service is reachable by the principals it is built for —
+  an HTTP server is built for network clients, a CLI for the users who run it.
+  "Internal-only" must be proven in the repository (bound to localhost, a
+  network policy in the repo) or stated by the owner (record it in
+  `owner_assumptions`); otherwise reachability follows from what the code
+  serves. A candidate whose only deciding fact is a control customarily
+  configured outside the repository (TLS termination, response headers,
+  NODE_ENV, umask, disk/backup encryption) becomes a hardening note, not a
+  finding; needs_review with a named R9 fact is reserved for a real code
+  defect whose exploitability hinges on exactly one such fact.
 - **R10.** Self-harm — a user damaging only themselves within their own
   rights — is not a trust-boundary crossing and not a finding.
 

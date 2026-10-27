@@ -58,7 +58,7 @@ safe.
   "findings": ["<Finding>"],
   "rejected": ["<RejectedRecord>"],
   "fixed": ["<FixedRecord>"],
-  "suppressed": [{"id": "F-0003", "reason": "rejected 12 days ago, trace unchanged"}],
+  "suppressed": [{"id": "F-0003", "reason": "rejected 12 days ago, trace unchanged", "candidates": []}],
   "summary": {
     "confirmed": 0, "likely": 0, "needs_review": 0, "rejected": 0, "fixed": 0, "disputed": 0,
     "rechecked": {"still_open": 0, "fixed": 0, "fixed_pending": 0, "moved": 0, "cant_tell": 0},
@@ -121,6 +121,12 @@ and the base for spotting a regression if the same fingerprint returns.
 - `id` (`F-NNNN`) is the primary key: unique within a snapshot, stable across
   snapshots for the same root cause. Id reuse comes from Phase 4 matching,
   never from recomputing a fingerprint.
+- `merged_from[]` lists the `candidates.jsonl` board ids that deduped into
+  this record (findings and rejected records). Accounting rule: every board
+  candidate maps to exactly one bucket — a finding's or rejected record's
+  `merged_from`, or a `suppressed` entry's `candidates[]`. A duplicate of
+  another root cause is always a merge, never a rejection or suppression.
+  `scripts/validate_findings.py --board candidates.jsonl` checks it.
 - `fingerprint` = `<path>::<symbol>::<slug>`: a repo-relative path; a symbol
   (`<router> <METHOD> <path>` for HTTP handlers, `<Class>.<method>` for
   methods, the function name otherwise); and a slug of 2–5 lowercase
@@ -195,4 +201,8 @@ not `missing_fact`; a rejected record lacks `verdict_date` or `reason`; a
 fixed record lacks fingerprint, title, evidence, or `recheck_date`; a recheck
 kind lacks a resolving `base_run` (it must point at a full snapshot); the
 summary counts disagree with the arrays (including `fixed` and `rechecked`);
-or `by_severity` does not sum to confirmed + likely.
+or `by_severity` does not sum to confirmed + likely. With `--board
+candidates.jsonl`, it additionally fails when any board candidate id is not
+accounted for in a finding's or rejected record's `merged_from` or a
+suppressed entry's `candidates` — no candidate may vanish between the board
+and the snapshot.

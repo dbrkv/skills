@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -17,6 +18,10 @@ from collections import Counter
 from contextlib import contextmanager
 from pathlib import Path
 from unittest import mock
+
+# sys.executable can resolve to the host AppImage inside sandboxed sessions;
+# spawn the PATH interpreter instead.
+PYTHON = shutil.which("python3") or sys.executable
 
 sys.path.insert(0, str(Path(__file__).parent))
 import run_store  # noqa: E402
@@ -491,6 +496,61 @@ class ValidatorTests(unittest.TestCase):
         doc["summary"]["rechecked"]["still_open"] = 0
         errs = self.validate(doc)
         self.assertTrue(any("summary.rechecked.still_open" in e for e in errs))
+
+
+class EvalsJsonTests(unittest.TestCase):
+    def test_evals_json_parses(self):
+        p = Path(__file__).resolve().parent.parent / "evals" / "evals.json"
+        data = json.loads(p.read_text())
+        evals = data.get("evals")
+        self.assertTrue(evals, "evals.json has no evals")
+        ids = [e["id"] for e in evals]
+        self.assertEqual(len(ids), len(set(ids)), "duplicate eval ids")
+        for e in evals:
+            for key in ("id", "name", "prompt", "expected_output", "expectations"):
+                self.assertTrue(e.get(key), f"eval {e.get('id')}: missing {key}")
+            self.assertTrue(isinstance(e["expectations"], list) and e["expectations"],
+                            f"eval {e['id']}: empty expectations")
+
+
+class BoardAccountingTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+        self.addCleanup(self.tmp.cleanup)
+
+    def write_board(self, lines):
+        p = self.base / "candidates.jsonl"
+        p.write_text("\n".join(json.dumps(l) for l in lines) + "\n")
+        return p
+
+    def test_board_full_coverage(self):
+        doc = snapshot_doc(
+            findings=[finding(merged_from=["u1-c1"])],
+            rej=[rejected(merged_from=["u2-c1"])],
+            suppressed=[{"id": "F-0002", "reason": "x", "candidates": ["u3-c1"]}])
+        board = self.write_board([{"id": "u1-c1"}, {"id": "u2-c1"}, {"id": "u3-c1"}])
+        run = self.base / "runs" / "2026-10-27-1"
+        run.mkdir(parents=True)
+        path = run / "findings.json"
+        path.write_text(json.dumps(doc))
+        r = subprocess.run([PYTHON, str(Path(validate_findings.__file__)),
+                            str(path), "--board", str(board)], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_board_lost_candidate_fails(self):
+        doc = snapshot_doc(findings=[finding(merged_from=["u1-c1"])],
+                           rej=[rejected()],   # F-0002 carries no merged_from
+                           suppressed=[])
+        board = self.write_board([{"id": "u1-c1"}, {"id": "u2-c1"}])   # u2-c1 vanishes
+        run = self.base / "runs" / "2026-10-27-1"
+        run.mkdir(parents=True)
+        path = run / "findings.json"
+        path.write_text(json.dumps(doc))
+        r = subprocess.run([PYTHON, str(Path(validate_findings.__file__)),
+                            str(path), "--board", str(board)], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("u2-c1 is not accounted", r.stdout)
 
 
 if __name__ == "__main__":

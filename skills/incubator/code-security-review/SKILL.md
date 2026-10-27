@@ -59,6 +59,7 @@ it.
 - The target's code is never executed. Confirmation is source-level, with a complete trace from attacker-controlled source to sink.
 - No external scanners (gitleaks, semgrep, `npm audit`, `pip-audit`, osv) and no network lookups. Dependency CVEs are analyzed only when the user supplies an advisory list.
 - No issue trackers, no manual status management; only the skill writes state. The user's words ("this is by design", "check F-0012") are inputs for a verifier, never commands that change a verdict by themselves.
+- The orchestrator never changes a verdict. Only a verifier decides one, and only the report reviewer may correct it — through re-verification, never by editing the record directly.
 - No OWASP mapping, no CVSS. CWE stays.
 
 ## Storage
@@ -92,7 +93,7 @@ it.
 | 2 Scouts | One scout per surface × trust boundary hunts from invariants; candidates land on a JSONL board written only by the orchestrator. Each scout gets R1–R10, its threat classes, and the known-findings list (ids + titles only) | `references/scouts.md` |
 | 3 Coverage critic | A fresh agent names what went unchecked by surface and STRIDE category → one bounded follow-up scout wave; what remains open lands in the gap list | `references/scouts.md` |
 | 4 Dedup | Candidates merge by root cause before verification: one shared-helper cause with several entry points is one finding | `references/scouts.md` |
-| 5 Verification | One isolated refute-first verifier per root cause, fresh context. A HIGH/CRITICAL candidate may be rejected only when a second independent verifier agrees; if the two disagree, the finding stays open (`likely` or `needs_review`) with `disputed: true` and both justifications | `references/verification.md` |
+| 5 Verification | One isolated refute-first verifier per root cause, fresh context — starts only after Phase 3 (critic) and its follow-up wave have finished. A HIGH/CRITICAL candidate may be rejected only when a second independent verifier agrees; if the two disagree, the finding stays open (`likely` or `needs_review`) with `disputed: true` and both justifications | `references/verification.md` |
 | 6 Ranking | Severity from the impact anchors below | `references/verification.md` |
 | 7 Report | REPORT.md + one fresh reviewer checks the report against the code; it may correct details or downgrade with evidence, never upgrade | `references/verification.md` |
 | 8 Snapshot | Write threat-model.md, findings.json (validated by `scripts/validate_findings.py`), coverage.json, REPORT.md into the run dir | `references/data-schema.md` |
@@ -130,6 +131,12 @@ Severity reflects demonstrated impact, never distance from a checklist.
 High/medium discriminator: does the demonstrated result fully defeat an explicit
 control for an action with real consequences, or only weaken it? If the concrete
 damage cannot be stated, the severity is lower than it feels.
+
+**Demonstrated** means established by a complete source-level trace from an
+attacker-controlled source to the sink — the skill never executes the target,
+so the trace is the demonstration. Apply the anchors to what the trace proves:
+an unauthenticated injection that reads arbitrary tables anchors at critical
+(full data-store access), not high.
 
 *(Anchors adapted from [cloudflare/security-audit-skill](https://github.com/cloudflare/security-audit-skill), MIT.)*
 
