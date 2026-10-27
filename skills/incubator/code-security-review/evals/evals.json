@@ -6,7 +6,9 @@
       "name": "node-express-true-positives",
       "prompt": "Run a security review of the Node.js/Express project located at evals/files/node-express-tp. Treat every file in that directory as newly-added code that needs auditing before merge. I want a real vulnerability scan, not a superficial read. Produce the skill's standard .security/ artifacts (threat model, config, findings, validated-findings, and a report). Place the entire .security/ directory into the provided outputs directory when you are done.",
       "expected_output": "A validated-findings.json that CONFIRMS at least the SQL injection in users.js, the hardcoded secrets in config.js, and the stored XSS in notes.js, plus a human-readable report.md.",
-      "files": ["evals/files/node-express-tp"],
+      "files": [
+        "evals/files/node-express-tp"
+      ],
       "expectations": [
         "A .security/validated-findings.json file was produced in the outputs directory",
         "validated-findings.json is valid JSON with a top-level summary object containing confirmed, likely, false_positives, needs_manual_review, and dismissed integer fields",
@@ -24,7 +26,9 @@
       "name": "python-flask-true-positives",
       "prompt": "Please audit the Python/Flask service at evals/files/python-flask-tp for security vulnerabilities before we deploy it. Scan all the code and validate anything you find. Produce the skill's standard .security/ artifacts and place the .security/ directory into the provided outputs directory.",
       "expected_output": "A validated-findings.json that CONFIRMS command injection (/ping), path traversal (/download), and SSRF (/preview), plus report.md.",
-      "files": ["evals/files/python-flask-tp"],
+      "files": [
+        "evals/files/python-flask-tp"
+      ],
       "expectations": [
         "A .security/validated-findings.json file was produced in the outputs directory",
         "validated-findings.json is valid JSON",
@@ -40,7 +44,9 @@
       "name": "mitigated-false-positives",
       "prompt": "Run a security review on the catalog API at evals/files/mitigated-fp. This codebase was recently hardened, so I expect it to be clean — please verify that thoroughly (don't just trust the 'hardened' comment). Produce the skill's standard .security/ artifacts and place the .security/ directory into the provided outputs directory.",
       "expected_output": "A validated-findings.json with ZERO confirmed findings. Any patterns the scan flags as suspicious should be filtered into false_positives or needs_manual_review, not CONFIRMED — the parameterized queries and validation middleware are real mitigations.",
-      "files": ["evals/files/mitigated-fp"],
+      "files": [
+        "evals/files/mitigated-fp"
+      ],
       "expectations": [
         "A .security/validated-findings.json file was produced in the outputs directory",
         "validated-findings.json summary.confirmed equals 0 (no confirmed vulnerabilities)",
@@ -56,7 +62,9 @@
       "name": "mixed-real-and-mitigated",
       "prompt": "Security-check the billing service at evals/files/mixed-real-mitigated. Scan the full change set and validate each finding so I know what's real. Produce the skill's standard .security/ artifacts and place the .security/ directory into the provided outputs directory.",
       "expected_output": "The real SQL injection in admin_users.js is CONFIRMED, while the parameterized query in products.js is NOT flagged. Tests that the skill validates rather than just pattern-matching.",
-      "files": ["evals/files/mixed-real-mitigated"],
+      "files": [
+        "evals/files/mixed-real-mitigated"
+      ],
       "expectations": [
         "A .security/validated-findings.json file was produced in the outputs directory",
         "validated-findings.json is valid JSON",
@@ -71,7 +79,9 @@
       "name": "threat-model-generation",
       "prompt": "Generate a threat model for the order-service repository at evals/files/order-service. I don't need a vulnerability scan yet — just the threat model and config so we have a foundation for future reviews. Place the .security/ directory (with threat-model.md and config.json) into the provided outputs directory.",
       "expected_output": "A STRIDE threat model document and config.json matching the skill's Phase 1 schema, covering all six STRIDE categories and the service's trust boundaries (Stripe, Postgres, JWT auth, file uploads).",
-      "files": ["evals/files/order-service"],
+      "files": [
+        "evals/files/order-service"
+      ],
       "expectations": [
         "A .security/threat-model.md file was produced in the outputs directory and is non-empty",
         "The threat model documents all six STRIDE categories: Spoofing, Tampering, Repudiation, Information Disclosure, Denial of Service, and Elevation of Privilege",
@@ -87,7 +97,9 @@
       "name": "header-at-proxy",
       "prompt": "Run a security review of the notes service at evals/files/header-proxy. Heads up: in production it runs behind nginx, but the nginx config is not part of this repo. Produce the skill's standard .security/ artifacts and place the .security/ directory into the provided outputs directory.",
       "expected_output": "No CONFIRMED security-headers finding (the control may live at the proxy, outside the repo): the observation lands in hardening_notes, or at worst in needs_manual_review with a missing_fact naming the external proxy configuration. Everything else in the fixture is clean.",
-      "files": ["evals/files/header-proxy"],
+      "files": [
+        "evals/files/header-proxy"
+      ],
       "expectations": [
         "A .security/validated-findings.json file was produced in the outputs directory and is valid JSON",
         "No CONFIRMED finding for missing security headers (no confirmed finding whose cwe is CWE-1021 or whose type mentions headers)",
@@ -101,7 +113,9 @@
       "name": "rerun-lifecycle",
       "prompt": "Multi-stage lifecycle test of the findings ledger on a git repository built from evals/files/ledger-app: stage 1 (initial full scan on the default branch with a clean tree — read-write) opens entries; stage 2 (re-run with no source change) carries verdicts without re-validation; stage 3 (fix commit) transitions the entry to fixed; stage 4 (revert of the fix) regresses it back to open. Stage ledger snapshots are copied to outputs as stage{1..4}-ledger.json.",
       "expected_output": "findings-ledger.json history shows opened -> carried -> fixed -> regressed for the vulnerable entry; stage 2 ran no validators for the carried finding; fixed only after a scan with covered D2 units.",
-      "files": ["evals/files/ledger-app"],
+      "files": [
+        "evals/files/ledger-app"
+      ],
       "expectations": [
         "stage1-ledger.json: the vulnerable entry is open with history event opened",
         "stage2-ledger.json: same keys, still open, history gained a carried event (verdict carried, not re-validated)",
@@ -115,7 +129,9 @@
       "name": "fixed-requires-coverage",
       "prompt": "Ledger honesty test: after the vulnerable code is removed but the D2 detector is force-failed via the config debug hook (debug.fail_detectors: [\"D2\"]), the ledger entry must stay open — 'not found because the detector died' must never become 'fixed'. Stage 1 (initial full scan) opens the entry; stage 2 (fix commit + fail_detectors hook) must leave it open with D2 units skipped and the report partial.",
       "expected_output": "stage2 ledger entry still open (not fixed); D2 coverage units skipped with a forced-failure reason; report declares a partial run.",
-      "files": ["evals/files/ledger-app"],
+      "files": [
+        "evals/files/ledger-app"
+      ],
       "expectations": [
         "stage1-ledger.json: the vulnerable entry is open",
         "stage2-ledger.json: the entry is still open (not fixed) despite the vulnerable code being gone",
@@ -128,12 +144,83 @@
       "name": "pr-read-only",
       "prompt": "Read-only mode test: a full scan on the default branch creates the ledger; a subsequent branch scan (feature branch adding a new vulnerable file plus a comment change in the vulnerable admin file) must not modify findings-ledger.json (byte-identical) while the report marks findings as new/known.",
       "expected_output": "branch run has ledger_mode read-only; findings-ledger.json byte-identical before and after the branch run; report contains new/known marks.",
-      "files": ["evals/files/ledger-app"],
+      "files": [
+        "evals/files/ledger-app"
+      ],
       "expectations": [
         "The branch run's scan_meta.ledger_mode is read-only",
         "findings-ledger.json is byte-identical after the branch run (compare with the committed main-run snapshot)",
         "The branch report marks the new finding as new",
         "The branch report marks the previously-seen finding as known (or its validated entry carries a non-null ledger key)"
+      ]
+    },
+    {
+      "id": 10,
+      "name": "dedupe",
+      "prompt": "Run a security review of the service at evals/files/dedupe-helper. A shared search helper is called from two routes; expect root-cause dedupe to produce ONE finding, not two. Produce the skill's standard .security/ artifacts and place the .security/ directory into the provided outputs directory.",
+      "expected_output": "Exactly one CONFIRMED SQL injection finding (CWE-89) rooted at the shared helper, listing both entry points (GET /users/search and GET /admin/users/search).",
+      "files": [
+        "evals/files/dedupe-helper"
+      ],
+      "expectations": [
+        "Exactly one CONFIRMED finding with cwe CWE-89",
+        "That finding lists at least two entry points",
+        "No duplicate confirmed SQL-injection findings for the shared helper"
+      ]
+    },
+    {
+      "id": 11,
+      "name": "client-env-secret",
+      "prompt": "Run a security review of the frontend project at evals/files/client-env-secret. A build-time secret is exposed to the client bundle. Produce the skill's standard .security/ artifacts and place the .security/ directory into the provided outputs directory.",
+      "expected_output": "A CONFIRMED secrets finding (CWE-798/540) on the client-shipped code: under trust rule R1 everything shipped to the client is public, so the env-var precedent must NOT refute it.",
+      "files": [
+        "evals/files/client-env-secret"
+      ],
+      "expectations": [
+        "At least one CONFIRMED finding with cwe CWE-798 or CWE-540 located in the client code",
+        "No false_positives entry refuting the client secret via the environment-variable precedent"
+      ]
+    },
+    {
+      "id": 12,
+      "name": "php-legacy",
+      "prompt": "Run a security review of the legacy PHP application at evals/files/php-legacy. Produce the skill's standard .security/ artifacts and place the .security/ directory into the provided outputs directory.",
+      "expected_output": "Four findings: SQL injection (CWE-89), insecure deserialization from the cookie (CWE-502), file inclusion from $_GET (CWE-98 family), and the loose == hash comparison (CWE-697 / AUTHN class under rule R8).",
+      "files": [
+        "evals/files/php-legacy"
+      ],
+      "expectations": [
+        "A CONFIRMED finding with cwe CWE-89",
+        "A CONFIRMED finding with cwe CWE-502",
+        "A CONFIRMED file-inclusion finding (cwe CWE-98 or the command/file-injection family)",
+        "A CONFIRMED finding for the loose hash comparison (cwe CWE-697 or an AUTHN-class finding on the login check)"
+      ]
+    },
+    {
+      "id": 13,
+      "name": "multi-impl",
+      "prompt": "Run a security review of the service at evals/files/multi-impl. It has one token-storage contract with two implementations: an OS-keychain store and a plaintext file store. Produce the skill's standard .security/ artifacts and place the .security/ directory into the provided outputs directory.",
+      "expected_output": "Exactly one confirmed token-storage finding, on the plaintext fileStore implementation (rule R7: each implementation is checked separately; a control present in the keychain store does not extend to the file store).",
+      "files": [
+        "evals/files/multi-impl"
+      ],
+      "expectations": [
+        "Exactly one CONFIRMED finding whose file is the plaintext file store",
+        "No CONFIRMED finding on the keychain store implementation"
+      ]
+    },
+    {
+      "id": 14,
+      "name": "detector-failure",
+      "prompt": "Run a security review of the service at evals/files/detector-failure-app with the D2 detector force-failed: after Phase 1 writes .security/config.json, add the test hook \"debug\": {\"fail_detectors\": [\"D2\"]} to it before detection, then continue the pipeline. Produce the skill's standard .security/ artifacts and place the .security/ directory into the provided outputs directory.",
+      "expected_output": "Every D2 coverage unit is skipped with a reason mentioning fail_detectors; the report declares the run partial; absence of access-control findings is not presented as evidence of cleanliness.",
+      "files": [
+        "evals/files/detector-failure-app"
+      ],
+      "expectations": [
+        "Every D2 coverage unit is skipped with a reason mentioning fail_detectors",
+        "report.md calls the run partial",
+        "validated-findings.json was produced and is valid JSON"
       ]
     }
   ]

@@ -1,0 +1,7 @@
+{
+  "name": "client-env-secret",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": { "build": "vite build" },
+  "devDependencies": { "vite": "^5.0.0" }
+}

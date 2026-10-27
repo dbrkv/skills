@@ -316,6 +316,12 @@ Gaining higher privileges than intended.
 
 {Threat entries}
 
+### Cross-cutting threats
+
+Threats with no STRIDE letter of their own (e.g. the SUPPLY class) go under a
+final "Cross-cutting" subsection here — still with `TH-NNN`, `Classes`, and
+`Components` wiring like every other entry.
+
 ---
 
 ## 6. Vulnerability Pattern Library
