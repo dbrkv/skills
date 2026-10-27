@@ -96,7 +96,7 @@ it.
 | 5 Verification | One isolated refute-first verifier per root cause, fresh context — starts only after Phase 3 (critic) and its follow-up wave have finished. A HIGH/CRITICAL candidate may be rejected only when a second independent verifier agrees; if the two disagree, the finding stays open (`likely` or `needs_review`) with `disputed: true` and both justifications | `references/verification.md` |
 | 6 Ranking | Severity from the impact anchors below | `references/verification.md` |
 | 7 Report | REPORT.md + one fresh reviewer checks the report against the code; it may correct details or downgrade with evidence, never upgrade | `references/verification.md` |
-| 8 Snapshot | Write threat-model.md, findings.json (validated by `scripts/validate_findings.py`), coverage.json, REPORT.md into the run dir | `references/data-schema.md` |
+| 8 Snapshot | Write threat-model.md, findings.json, coverage.json, REPORT.md into the run dir, then validate — it must print OK before the report is issued: `python3 scripts/validate_findings.py <run>/findings.json --board <run>/candidates.jsonl --prev <latest-run-dir>` (omit `--prev` on the first run — no snapshots yet). A validator error means the snapshot is not ready: fix and re-validate | `references/data-schema.md` |
 
 When subagents are unavailable, every fan-out phase degrades to sequential
 passes in one context under the same contracts, and the snapshot records the

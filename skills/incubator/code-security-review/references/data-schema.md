@@ -198,6 +198,18 @@ count from the findings.json `summary` — it never recomputes them.
 
 ## Validation (scripts/validate_findings.py)
 
+Exact commands — the snapshot is not ready until the validator prints OK; fix
+and re-validate, never issue the report before that:
+
+```bash
+# full snapshot (omit --prev on the first run — no snapshots yet)
+python3 scripts/validate_findings.py <run>/findings.json \
+    --board <run>/candidates.jsonl --prev <latest-run-dir>
+
+# recheck snapshot (no board — it is a full-run artifact)
+python3 scripts/validate_findings.py <run>/findings.json --prev <latest-full-run-dir>
+```
+
 The validator fails the file when: the JSON is unparseable; `kind` is not
 full or recheck; ids are duplicated (across findings, rejected, and fixed) or
 malformed; a status, severity, or STRIDE token is unknown; severity sits on

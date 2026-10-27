@@ -239,5 +239,7 @@ Phase 5.
    `REPORT.md` covers the rechecked subset; `base_run` names the base
    **full** snapshot (a recheck never chains onto another recheck);
    `threat-model.md` and `coverage.json` are referenced, not rewritten.
-   Validate with `scripts/validate_findings.py`.
+   Then validate — it must print OK before the answer or report is issued:
+   `python3 scripts/validate_findings.py <run>/findings.json --prev <latest-full-run-dir>`.
+   A validator error means the snapshot is not ready: fix and re-validate.
 5. Answer in chat: per-finding verdicts with one-line reasons.
