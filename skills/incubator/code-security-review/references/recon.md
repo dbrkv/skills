@@ -14,13 +14,15 @@ applies; everything here describes full mode unless said otherwise.
 3. **repo-id.** `python3 scripts/run_store.py repo-id` — the normalized
    `origin` URL; without a remote, `local-<first 12 hex of sha256 of the root
    commit>`.
-4. **Latest snapshot.** `python3 scripts/run_store.py latest-run` prints the
-   newest run directory (any kind) for this repo-id. If one exists, read:
-   - open findings (confirmed / likely / needs_review) → the Phase 1 recheck list;
-   - rejected records (id, fingerprint, title, verdict_date, trace) → the
-     Phase 4 suppression list;
-   - coverage gaps → scout-planning input;
-   - the previous threat model → the diff base for Phase 1.
+4. **Snapshots.** `python3 scripts/run_store.py latest-run` prints two paths
+   as JSON: the latest snapshot of any kind (the current findings state) and
+   the latest `full` snapshot (the coverage and threat-model state — recheck
+   snapshots carry neither). When they exist, read:
+   - from the latest snapshot: open findings (confirmed / likely /
+     needs_review) → the Phase 1 recheck list; rejected records (id,
+     fingerprint, title, verdict_date, trace) → the Phase 1 rejected pass;
+   - from the latest full snapshot: coverage gaps → scout-planning input;
+     the previous threat model → the diff base for Phase 1.
 5. **Plan.** Print 2–5 lines: scope, repo-id, snapshot used (or "first run"),
    planned phases. Phase 0 writes nothing to disk.
 
@@ -79,21 +81,41 @@ Run: <run-id> · date · source_ref · scope
 The diff section is what REPORT.md quotes; the model is never edited by hand
 between runs.
 
-## Recheck of open findings (in parallel with recon)
+## Recheck pass (in parallel with recon)
 
-Every open finding from the latest snapshot gets one fresh verifier (bundle
-and contract: `verification.md`) that reads the current code and returns
-exactly one of:
+**Open findings.** Every open finding from the latest snapshot gets one fresh
+recheck verifier (prompt and contract: `verification.md`) that reads the
+current code and returns exactly one of:
 
 | Result | Meaning |
 |--------|---------|
 | `still_open` | The trace code is present and the vulnerability holds as recorded (line refs updated) |
-| `fixed` | The trace code is gone or a control now blocks it (cite the code that fixed it) |
+| `fixed` | A control now blocks it or the trace code is gone — on a committed state; cite the code that fixes it |
+| `fixed_pending` | A control now blocks it, but only in uncommitted changes (the tree is dirty and the trace files are modified): the finding is carried with `last_recheck.result: fixed_pending` |
 | `moved` | The root cause relocated (new path or symbol): keep the id, set the new fingerprint, append the old one to `previous_fingerprints[]` |
 | `cant_tell` | The deciding fact is not source-visible (R9) — the finding stays open with the missing fact named |
+
+A `fixed` or `fixed_pending` result for a finding whose severity is high or
+critical requires a second independent verifier's agreement; disagreement
+keeps the finding `still_open` with `disputed: true` (the second-verifier
+rule in `verification.md`). A `fixed` finding is absent from the new
+snapshot; `fixed_pending` is carried until a later run confirms `fixed` on a
+committed state (clean tree, or a ref that contains the fix).
+
+**Rejected records.** Each rejected record from the latest snapshot is run
+through `scripts/run_store.py trace-changed <id>`:
+
+- unchanged trace and verdict under 90 days old → carried verbatim into the
+  new snapshot (the original `verdict_date` and `verdict_source_ref` stand);
+- changed trace, unavailable ref, or a verdict 90 days old or older → the
+  record joins the recheck list above and is re-verified on the same id. A
+  fresh rejection is a fresh verdict (`verdict_date` = this run); a different
+  verdict becomes the finding's new status.
+
+Phase 4's matching against rejected records remains as a second safety net
+for candidates the scouts raise despite the known-findings list.
 
 User words arriving with the request ("I added validation to F-0012") are
 attached to that finding's verifier as evidence to check, and recorded in
 `owner_assumptions[]` when a verdict rests on them. Results land in the new
-snapshot (`last_recheck`) and in the report's recheck table; a `fixed` finding
-is simply absent from the new snapshot.
+snapshot (`last_recheck`) and in the report's recheck table.

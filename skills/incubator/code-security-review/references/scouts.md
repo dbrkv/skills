@@ -106,7 +106,8 @@ scout; a second failure marks the unit `blocked` with the reason.
 The orchestrator — and only the orchestrator — appends every valid candidate
 to `candidates.jsonl` in the run directory (one JSON object per line: the
 candidate plus its unit id). Scouts never write the board. The board is the
-sole input to Phase 4.
+sole input to Phase 4. It is a working artifact: later runs never read it,
+and in quick mode it stays an in-memory list — nothing is written.
 
 ## Phase 3 — Coverage critic
 
@@ -141,6 +142,8 @@ Before verification, merge the board:
    - a candidate matches a **rejected record** → run
      `scripts/run_store.py trace-changed <id>`: unchanged trace and verdict
      under 90 days old → suppress (log it in `suppressed`, keep the record);
-     changed trace or expired verdict → re-verify on the same id;
+     changed trace or expired verdict → re-verify on the same id. This is the
+     second safety net — Phase 1 has already run `trace-changed` over every
+     rejected record and carried or re-queued them;
    - no match → `scripts/run_store.py next-id` issues a fresh number.
 3. Output: the deduped findings list — one entry per root cause — for Phase 5.

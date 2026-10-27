@@ -67,10 +67,12 @@ Return exactly one JSON object and no surrounding prose, per the contract.
 
 Field rules: `severity` non-null only for confirmed/likely;
 `exploitation_path` only for confirmed/likely; `evidence` always — a rejected
-verdict names the refuting code; `missing_fact` non-empty exactly for
-needs_review; `owner_assumptions` records every user-supplied or deployment
-fact the verdict rests on ("the endpoint is internal-only") — a later run
-re-checks these first.
+verdict names the refuting code; a needs_review the verifier returns itself
+carries its `missing_fact` (the orchestrator-assigned
+`reason_code: "validator_output_invalid"` case has no fact — see below);
+`owner_assumptions` records every user-supplied or deployment fact the
+verdict rests on ("the endpoint is internal-only") — a later run re-checks
+these first.
 
 **Methodology.** (1) *Reachability* — can an outsider reach the path:
 external / authenticated / internal / unreachable. (2) *Control flow* — trace
@@ -82,18 +84,79 @@ in the code. (4) *Exploitability* — easy / medium / hard / not_exploitable.
 
 **Invalid output** (unparseable, prose, contract violation): re-run once with
 a fresh verifier; a second failure → `needs_review` with
-`reason_code: "validator_output_invalid"`.
+`reason_code: "validator_output_invalid"` and `missing_fact: null`.
+
+**Verifier cap.** More than 20 root causes after dedup → verify in
+`severity_guess` descending order (ties broken by confidence, then file
+path); every remaining candidate becomes `needs_review` with
+`reason_code: "not_validated"` and `missing_fact: null`. The report lists
+them on a separate line with "say 'validate all' to verify the rest"; the
+user saying it raises the cap for that run, and the next run rechecks
+not_validated findings like any open ones.
 
 ### The second-verifier rule
 
-When a verifier returns **rejected** for a candidate whose provisional
-severity (the scout's `severity_guess`, or the dedup's estimate) is high or
-critical, the verdict stands only if a **second independent verifier** —
-fresh context, same bundle, not shown the first verdict — also rejects.
-Agree → rejected. Disagree → the finding stays open: status `likely` or
-`needs_review`, `disputed: true`, `verifier_reasons` holds both
-justifications verbatim, and the report shows the disagreement. The same rule
-applies in recheck mode.
+Two verdicts are too consequential for one agent and require the agreement
+of a **second independent verifier** — fresh context, same bundle, not shown
+the first verdict:
+
+1. **rejecting** a candidate whose provisional severity (the scout's
+   `severity_guess`, or the dedup's estimate) is high or critical;
+2. **closing** a high/critical finding as `fixed` or `fixed_pending` — in the
+   Phase 1 recheck pass and in recheck mode alike.
+
+Agreement → the verdict stands. Disagreement → for (1) the finding stays
+open: status `likely` or `needs_review`; for (2) the result is `still_open`;
+in both cases `disputed: true`, `verifier_reasons` holds both justifications
+verbatim, and the report shows the disagreement.
+
+### The recheck contract (Phase 1 recheck pass and recheck mode)
+
+A recheck verifier receives the finding record (id, fingerprint, title,
+status, severity, trace, evidence), the current code, and any user words
+attached to the request. Dispatch prompt (copy verbatim):
+
+```text
+You are rechecking a previously reported security finding against the current
+code. Read the finding's trace, then read the code as it is now. Decide
+exactly one result — do not re-litigate the original verdict where the code
+has not changed:
+
+- still_open: the trace code is present and the vulnerability holds.
+- fixed: a control now blocks it or the code is gone, on a committed state —
+  cite the code that fixes it.
+- fixed_pending: a control blocks it only in uncommitted changes (the tree
+  is dirty and the trace files are modified).
+- moved: the root cause relocated — give the new path and symbol.
+- cant_tell: the deciding fact is not source-visible (rule R9) — name it.
+
+The target's code is never executed. Return exactly one JSON object and no
+surrounding prose, per the contract.
+```
+
+Response contract:
+
+```json
+{
+  "id": "F-0012",
+  "result": "still_open | fixed | fixed_pending | moved | cant_tell",
+  "status": "confirmed | likely | needs_review | null",
+  "severity": "critical | high | medium | low | null",
+  "fingerprint": null,
+  "line_range": null,
+  "evidence": [{"file": "path", "line": 0, "note": "what this proves"}],
+  "owner_assumptions": [],
+  "reason": "why this result"
+}
+```
+
+Field rules: `status`, `severity`, `fingerprint`, `line_range` are updates
+and are sent only for `still_open` and `moved` (`fingerprint` only for
+`moved` — the new fingerprint; the orchestrator appends the old one to
+`previous_fingerprints[]`). `fixed` and `fixed_pending` require evidence
+citing the blocking code. `cant_tell` names the missing fact in `reason`. A
+high/critical `fixed`/`fixed_pending` passes the second-verifier rule above
+before it takes effect.
 
 ## Phase 6 — Ranking
 
@@ -115,7 +178,8 @@ REPORT.md structure (file contract: `data-schema.md`):
 3. **Rechecked findings** — the still_open / fixed / moved / cant_tell table.
 4. **Findings** — confirmed then likely, severity-descending: severity,
    title, `file:symbol`, status; disputed marked; needs_review grouped by
-   missing fact vs. not-validated reasons.
+   missing fact vs. not-validated reasons (invalid output, verifier cap —
+   with "say 'validate all' to verify the rest" when the cap applied).
 5. **Rejected** — one line each, with the refuting reason.
 6. **Assumptions behind rejections** — every `owner_assumptions[]` entry; the
    section is always present (state "none" when empty).
@@ -140,13 +204,15 @@ Phase 5.
 2. Select the named findings, or all open ones (confirmed / likely /
    needs_review). Rejected records are re-raised only when their trace
    changed or the verdict is 90 days old or older.
-3. Run Phase 5 verifiers over the selection (second-verifier rule included).
+3. Run Phase 5 verifiers over the selection (second-verifier rule included:
+   a high/critical finding closes as fixed only on two agreeing verifiers).
    User words accompanying the request are attached to the relevant finding
-   as evidence to check.
+   as evidence to check. The verdicts use the recheck contract above.
 4. Write a `kind: recheck` snapshot: `findings.json` holds the base
    snapshot's findings with updated verdicts for the rechecked ids —
    everything else verbatim, rejected records keep their original
    `verdict_date`; `REPORT.md` covers the rechecked subset; `base_run` names
-   the base snapshot; `threat-model.md` and `coverage.json` are referenced,
-   not rewritten. Validate with `scripts/validate_findings.py`.
+   the base **full** snapshot (a recheck never chains onto another recheck);
+   `threat-model.md` and `coverage.json` are referenced, not rewritten.
+   Validate with `scripts/validate_findings.py`.
 5. Answer in chat: per-finding verdicts with one-line reasons.

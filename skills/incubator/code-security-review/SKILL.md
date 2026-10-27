@@ -73,14 +73,14 @@ it.
 
 - `repo-id` — normalized `origin` URL (`github.com/owner/repo`: scheme, credentials, and `.git` stripped, host lowercased). Without a remote — `local-<first 12 hex of sha256 of the root commit>`. Computed by `scripts/run_store.py repo-id`.
 - Run directory — next `<n>` for the date (`scripts/run_store.py next-run-dir`). Snapshots are immutable: a run never edits or deletes earlier snapshots; corrections land in the next run.
-- Memory between runs: the latest snapshot supplies open findings, rejected records, coverage gaps, and the previous threat model. Open findings (confirmed / likely / needs_review) are rechecked at every full run; a fixed finding simply disappears from the new snapshot.
+- Memory between runs: the latest snapshot supplies open findings and rejected records; the latest **full** snapshot supplies coverage gaps and the previous threat model. Open findings (confirmed / likely / needs_review) are rechecked at every full run; a fix confirmed only on an uncommitted tree keeps the finding (`fixed_pending`) until a later run confirms it on a committed state. Rejected records are carried verbatim until their trace changes or the 90-day term expires — either re-opens verification on the same id.
 
 ## Findings
 
 - **Id `F-NNNN` is the primary key** — stable per repository, carried explicitly across runs, never recomputed from content. Phase 4 dedup matches candidates against the latest snapshot (it receives each known finding's id + fingerprint + title) and reuses the id for the same root cause; a `moved` finding keeps its id and appends the new fingerprint to `previous_fingerprints[]`. `scripts/run_store.py next-id` only issues numbers for genuinely new causes — it never matches.
 - **Fingerprint** `<path>::<symbol>::<root-cause-slug>` — repo-relative path, enclosing symbol (route, handler, function), and a short semantic slug of the root cause (e.g. `sql-concat-in-search`). CWE is a separate field; the code snippet is evidence, not identity — a reworded fix must not mint a new id. Full format: `references/data-schema.md`.
 - **Statuses**: `confirmed` / `likely` / `needs_review` / `rejected`.
-- **`rejected` records are kept and suppressed** from new candidates while the trace code is unchanged (`scripts/run_store.py trace-changed`) and the original verdict is under 90 days old. When a rejected record is carried into a new snapshot, it keeps its original `verdict_date` and `verdict_source_ref` — the term never resets.
+- **`rejected` records are kept and suppressed** from new candidates while the trace code is unchanged (`scripts/run_store.py trace-changed`) and the original verdict is under 90 days old. Every full run re-runs `trace-changed` over each rejected record: fresh and unchanged → carried verbatim; changed or expired → re-verified on the same id. A carried record keeps its original `verdict_date` and `verdict_source_ref` — the term never resets.
 - A claim the user calls "by design" or "fixed" is re-verified against the code, not dropped: the verifier treats the user's claim as evidence to check, and the assumption a rejection rests on is recorded in the finding's `owner_assumptions[]`.
 
 ## The full pipeline
@@ -88,7 +88,7 @@ it.
 | Phase | What happens | Reference |
 |-------|--------------|-----------|
 | 0 Preparation | Resolve scope, compute repo-id, read the latest snapshot (open findings, rejected records, gaps, previous threat model), print a short plan | `references/recon.md` |
-| 1 Recon | 2–3 parallel agents map architecture, principals and controls, entry surfaces → a fresh STRIDE threat model + diff vs the previous one. In parallel, open findings from the last run are rechecked: still_open / fixed / moved / cant_tell | `references/recon.md` |
+| 1 Recon | 2–3 parallel agents map architecture, principals and controls, entry surfaces → a fresh STRIDE threat model + diff vs the previous one. In parallel: open findings from the last run are rechecked (still_open / fixed / fixed_pending / moved / cant_tell; a high/critical finding closes as fixed only when a second verifier agrees), and rejected records are carried verbatim or re-verified per `trace-changed` and the 90-day term | `references/recon.md` |
 | 2 Scouts | One scout per surface × trust boundary hunts from invariants; candidates land on a JSONL board written only by the orchestrator. Each scout gets R1–R10, its threat classes, and the known-findings list (ids + titles only) | `references/scouts.md` |
 | 3 Coverage critic | A fresh agent names what went unchecked by surface and STRIDE category → one bounded follow-up scout wave; what remains open lands in the gap list | `references/scouts.md` |
 | 4 Dedup | Candidates merge by root cause before verification: one shared-helper cause with several entry points is one finding | `references/scouts.md` |

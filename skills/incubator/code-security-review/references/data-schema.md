@@ -8,15 +8,23 @@ implements the storage rules.
 
 - Root: `~/.security-audit/`, overridable with the `SECURITY_AUDIT_HOME`
   environment variable (every script honors it; evals use it to isolate
-  their runs from the real store).
+  their runs from the real store). `SECURITY_AUDIT_REPO_ID` overrides the
+  computed repo-id outright (used when the target is a plain directory
+  inside another git repository).
 - `<repo-id>`: the normalized `origin` URL — strip the scheme, credentials,
   and `.git`; lowercase the host. Without a remote:
   `local-<first 12 hex of sha256 of the root commit>`, where the root commit
   is `git rev-list --max-parents=0 HEAD`.
 - Runs: `runs/<YYYY-MM-DD>-<n>/`, `<n>` starting at 1 per date. Snapshots are
   immutable — a run never edits or deletes an earlier run.
-- Latest snapshot: the newest run directory of any kind (sorted by name); it
-  is the current state.
+- Latest snapshot: the newest run of any kind — the current **findings**
+  state. Latest full snapshot: the newest `kind: full` run — the current
+  **coverage and threat-model** state. `latest-run` reports both.
+- `trace-changed <id>`: reads the record from the latest snapshot and
+  compares its `trace_paths` between `verdict_source_ref` and the working
+  tree (committed diff, staged changes, and untracked files under those
+  paths). An unavailable ref (rebase, squash) or a non-git directory
+  resolves to `changed` — fail-open: suppression never fires on uncertainty.
 
 ## Snapshot kinds
 
@@ -25,9 +33,12 @@ implements the storage rules.
 | `full` | threat-model.md, findings.json, coverage.json, REPORT.md | a full run (Phase 8) |
 | `recheck` | findings.json, REPORT.md | recheck mode |
 
-A recheck snapshot's `base_run` names the full snapshot whose coverage.json
-and threat-model.md still apply. The next full snapshot supersedes
-everything before it.
+A recheck snapshot's `base_run` names the base **full** snapshot whose
+coverage.json and threat-model.md still apply — a recheck never chains onto
+another recheck. The next full snapshot supersedes everything before it.
+`candidates.jsonl` (the Phase 2–4 board) is a full-run working artifact
+written by the orchestrator: later runs never read it, and deleting it is
+safe.
 
 ## findings.json
 
@@ -47,7 +58,7 @@ everything before it.
   "suppressed": [{"id": "F-0003", "reason": "rejected 12 days ago, trace unchanged"}],
   "summary": {
     "confirmed": 0, "likely": 0, "needs_review": 0, "rejected": 0, "disputed": 0,
-    "rechecked": {"still_open": 0, "fixed": 0, "moved": 0, "cant_tell": 0},
+    "rechecked": {"still_open": 0, "fixed": 0, "fixed_pending": 0, "moved": 0, "cant_tell": 0},
     "by_severity": {"critical": 0, "high": 0, "medium": 0, "low": 0}
   }
 }
@@ -110,13 +121,19 @@ original verdict.
   identity — a reworded fix must not mint a new id.
 - `severity` present iff status is confirmed or likely. A disputed finding
   may carry severity (provisional); needs_review never does.
-- `missing_fact` non-empty exactly when status is needs_review; `reason_code`
-  then is `missing_fact` or `validator_output_invalid`.
+- A needs_review finding carries a `reason_code`: `missing_fact` (the
+  verifier's unresolved fact — `missing_fact` is then required and
+  non-empty), `validator_output_invalid`, or `not_validated` (the verifier
+  cap) — the latter two carry `missing_fact: null`.
 - `owner_assumptions` lists the user-supplied or deployment facts a verdict
   rests on; REPORT.md renders them in a dedicated section.
 - `last_recheck` is `{date, result}` with result `still_open` | `fixed` |
-  `moved` | `cant_tell`, set by the Phase 1 recheck or recheck mode. A
-  `fixed` finding is not carried into the next snapshot at all.
+  `fixed_pending` | `moved` | `cant_tell`, set by the Phase 1 recheck pass or
+  recheck mode. A `fixed` finding is not carried into the next snapshot;
+  `fixed_pending` (the fix is visible only in an uncommitted tree) is carried
+  until a later run confirms `fixed` on a committed state. The summary's
+  `rechecked` counts the rechecks whose `last_recheck.date` equals this run's
+  date.
 - `summary` is derived from the arrays by counting — never authored.
 
 ## coverage.json
@@ -160,7 +177,9 @@ count from the findings.json `summary` — it never recomputes them.
 The validator fails the file when: the JSON is unparseable; `kind` is not
 full or recheck; ids are duplicated or malformed; a status, severity, or
 STRIDE token is unknown; severity sits on needs_review or is missing on
-confirmed/likely; `missing_fact` is inconsistent with status; a rejected
-record lacks `verdict_date`; a recheck kind lacks a resolving `base_run`; the
-summary counts disagree with the arrays; or `by_severity` does not sum to
-confirmed + likely.
+confirmed/likely; a needs_review lacks a known `reason_code`, or
+`missing_fact` is non-empty exactly when `reason_code` is not `missing_fact`;
+a rejected record lacks `verdict_date` or `reason`; a recheck kind lacks a
+resolving `base_run` (it must point at a full snapshot); the summary counts
+disagree with the arrays; or `by_severity` does not sum to confirmed +
+likely.
