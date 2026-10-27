@@ -1,0 +1,218 @@
+{
+  "skill_name": "code-security-review",
+  "evals": [
+    {
+      "id": 1,
+      "name": "node-express-true-positives",
+      "prompt": "Run a full security audit of the Node.js/Express project in the input directory (explicit request: audit this codebase end to end and save the results). Work ON A COPY: cp -r the input directory to a temp dir first and audit the copy. For every script call export SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/node-express\". Follow the skill's full pipeline (phases 0-8) and write the run snapshot into the store. When done, copy the whole store directory into <outputs>/store-copy so the snapshot is preserved for grading.",
+      "expected_output": "A full run snapshot (findings.json, coverage.json, REPORT.md, threat-model.md) in the isolated store, confirming the SQL injection in users.js, the hardcoded secrets in config.js, and the stored XSS in notes.js.",
+      "files": [
+        "files/node-express-tp"
+      ],
+      "expectations": [
+        "A kind:full snapshot with findings.json exists in the copied store and passes scripts/validate_findings.py",
+        "findings.json contains a confirmed CWE-89 finding in src/routes/users.js",
+        "findings.json contains a confirmed CWE-798 finding in src/config.js",
+        "findings.json contains a confirmed CWE-79 finding in src/routes/notes.js",
+        "REPORT.md is non-empty and its header states coverage",
+        "threat-model.md exists and covers the six STRIDE categories",
+        "Deployment-control candidates (NODE_ENV, host permissions, backups, stack traces) appear as hardening notes in coverage.json, not as needs_review findings"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "python-flask-true-positives",
+      "prompt": "Full security audit of the Python/Flask service in the input directory (explicit request). Work ON A COPY in a temp dir. Export SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/flask\" for every script call. Follow the full pipeline and copy the finished store into <outputs>/store-copy.",
+      "expected_output": "A full snapshot confirming command injection (/ping), path traversal (/download), and SSRF (/preview).",
+      "files": [
+        "files/python-flask-tp"
+      ],
+      "expectations": [
+        "A kind:full snapshot with findings.json exists in the copied store and passes scripts/validate_findings.py",
+        "A confirmed CWE-78 finding references the /ping endpoint",
+        "A confirmed CWE-22 finding references the /download endpoint",
+        "A confirmed CWE-918 finding references the /preview endpoint",
+        "REPORT.md is non-empty"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "mitigated-false-positives",
+      "prompt": "Full security audit of the catalog API in the input directory (explicit request). The codebase was recently hardened - verify that thoroughly in the code, do not trust the comment. Work ON A COPY in a temp dir. Export SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/mitigated\" for every script call. Follow the full pipeline and copy the store into <outputs>/store-copy.",
+      "expected_output": "A full snapshot with ZERO confirmed findings; suspicious patterns end up as rejected records (with refuting evidence) or needs_review - never confirmed.",
+      "files": [
+        "files/mitigated-fp"
+      ],
+      "expectations": [
+        "A kind:full snapshot with findings.json exists in the copied store and passes scripts/validate_findings.py",
+        "findings.json has zero confirmed findings",
+        "No confirmed finding marks the parameterized query in src/routes/products.js as SQL injection",
+        "Any refuted candidates appear in rejected records with evidence naming the refuting code",
+        "REPORT.md states plainly that there are no confirmed findings"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "mixed-real-and-mitigated",
+      "prompt": "Full security audit of the billing service in the input directory (explicit request) - validate each finding so I know what is real. Work ON A COPY in a temp dir. Export SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/mixed\" for every script call. Follow the full pipeline and copy the store into <outputs>/store-copy.",
+      "expected_output": "The real SQL injection in admin_users.js is confirmed at critical severity (unauthenticated arbitrary-table read); missing authentication is confirmed; deployment-control candidates (NODE_ENV, stack traces) become hardening notes, not needs_review findings; the parameterized query in products.js is not flagged.",
+      "files": [
+        "files/mixed-real-mitigated"
+      ],
+      "expectations": [
+        "A kind:full snapshot with findings.json exists in the copied store and passes scripts/validate_findings.py",
+        "The CWE-89 finding in src/routes/admin_users.js is confirmed with severity critical",
+        "The missing-authentication finding (CWE-306) is confirmed - service exposure is not an R9 fact",
+        "Deployment-control candidates (NODE_ENV, stack traces, proxy, headers) appear as hardening notes in coverage.json, not as needs_review findings",
+        "The parameterized query in src/routes/products.js is not a confirmed finding",
+        "REPORT.md is non-empty"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "threat-model-in-full-audit",
+      "prompt": "Full security audit of the order-service repository in the input directory (explicit request) - I care most about the threat model being complete. Work ON A COPY in a temp dir. Export SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/order\" for every script call. Follow the full pipeline (the threat model is produced in Phase 1) and copy the store into <outputs>/store-copy.",
+      "expected_output": "threat-model.md in the snapshot covers all six STRIDE categories and the service's trust boundaries (Stripe, Postgres, JWT auth, file uploads), with a first-run diff note.",
+      "files": [
+        "files/order-service"
+      ],
+      "expectations": [
+        "A kind:full snapshot exists in the copied store",
+        "threat-model.md documents all six STRIDE categories (Spoofing, Tampering, Repudiation, Information Disclosure, Denial of Service, Elevation of Privilege)",
+        "threat-model.md identifies at least one trust boundary or external dependency (Stripe, PostgreSQL, JWT auth, or file uploads)",
+        "threat-model.md contains a diff-vs-previous-model section noting this is the first run",
+        "findings.json passes scripts/validate_findings.py"
+      ]
+    },
+    {
+      "id": 10,
+      "name": "dedupe",
+      "prompt": "Full security audit of the service in the input directory (explicit request). A shared search helper is called from two routes; root-cause dedup must produce ONE finding, not two. Work ON A COPY in a temp dir. Export SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/dedupe\" for every script call. Follow the full pipeline and copy the store into <outputs>/store-copy.",
+      "expected_output": "Exactly one confirmed CWE-89 finding rooted at the shared helper, listing both entry points (GET /users/search and GET /admin/users/search).",
+      "files": [
+        "files/dedupe-helper"
+      ],
+      "expectations": [
+        "A kind:full snapshot exists in the copied store and passes scripts/validate_findings.py",
+        "Exactly one confirmed CWE-89 finding exists",
+        "That finding lists at least two entry points",
+        "No duplicate confirmed SQL-injection findings for the shared helper"
+      ]
+    },
+    {
+      "id": 11,
+      "name": "client-env-secret",
+      "prompt": "Full security audit of the frontend project in the input directory (explicit request). A build-time secret is exposed to the client bundle. Work ON A COPY in a temp dir. Export SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/client-secret\" for every script call. Follow the full pipeline and copy the store into <outputs>/store-copy.",
+      "expected_output": "A confirmed CWE-798 or CWE-540 finding on the client-shipped code; under trust rule R1 everything shipped to the client is public, so the env-var precedent must not refute it.",
+      "files": [
+        "files/client-env-secret"
+      ],
+      "expectations": [
+        "A kind:full snapshot exists in the copied store and passes scripts/validate_findings.py",
+        "At least one confirmed CWE-798 or CWE-540 finding is located in the client code (src/api.js or the vite config)",
+        "No rejected record refutes the client secret via the environment-variable precedent"
+      ]
+    },
+    {
+      "id": 12,
+      "name": "php-legacy",
+      "prompt": "Full security audit of the legacy PHP application in the input directory (explicit request). Work ON A COPY in a temp dir. Export SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/php\" for every script call. Follow the full pipeline and copy the store into <outputs>/store-copy.",
+      "expected_output": "Four confirmed findings: SQL injection (CWE-89), insecure deserialization from the cookie (CWE-502), file inclusion from $_GET (CWE-98 family), and the loose == hash comparison (CWE-697 / AUTHN under rule R8).",
+      "files": [
+        "files/php-legacy"
+      ],
+      "expectations": [
+        "A confirmed CWE-89 finding exists",
+        "A CWE-502 finding exists with status confirmed OR likely, and its reason/missing_fact names the unverifiable condition (the POP gadget chain) - the fixture has no classes with magic methods, so likely is the correct verdict",
+        "A confirmed file-inclusion finding exists (CWE-98 or an injection-family finding on the include path)",
+        "A confirmed finding covers the loose hash comparison (CWE-697 or an AUTHN-class finding on the login check)"
+      ]
+    },
+    {
+      "id": 13,
+      "name": "multi-impl",
+      "prompt": "Full security audit of the service in the input directory (explicit request). One token-storage contract, two implementations: an OS-keychain store and a plaintext file store. Work ON A COPY in a temp dir. Export SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/multi-impl\" for every script call. Follow the full pipeline and copy the store into <outputs>/store-copy.",
+      "expected_output": "Exactly one confirmed token-storage finding, on the plaintext fileStore implementation (rule R7: each implementation is checked separately).",
+      "files": [
+        "files/multi-impl"
+      ],
+      "expectations": [
+        "A kind:full snapshot exists in the copied store and passes scripts/validate_findings.py",
+        "Exactly one confirmed finding whose file is the plaintext file store",
+        "No confirmed finding on the keychain store implementation"
+      ]
+    },
+    {
+      "id": 15,
+      "name": "rerun-full-full",
+      "prompt": "Multi-stage memory test on a git repository built from the input directory. Use a temp working dir W. Stage 1: cp -r the input to W/app, cd W/app, git init -q, git add -A, git commit -qm init. Run a FULL security audit (explicit request) with SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/rerun\" exported for every script call. Copy the store's run snapshot directory to <outputs>/stage1-snapshot/. Stage 2: in W/app fix the SQL injection in src/routes/admin_users.js (parameterize the query), git add -A, git commit -qm fix. Stage 3: run the FULL audit again (same env). Copy the new run snapshot directory to <outputs>/stage3-snapshot/. Note the F-id of the SQL-injection finding from stage 1 in <outputs>/notes.txt.",
+      "expected_output": "Stage 3 keeps the stage-1 F-id out of findings (it moved to fixed[] with evidence), summary.rechecked.fixed counts it, any stage-1 rejected records are carried with their original verdict_date, and the stage-3 report notes the closure.",
+      "files": [
+        "files/mixed-real-mitigated"
+      ],
+      "expectations": [
+        "Stage 1 snapshot has a confirmed CWE-89 finding in src/routes/admin_users.js with an F-NNNN id",
+        "Stage 3 snapshot: that id is NOT among findings and IS in the fixed array with evidence",
+        "Stage 3 summary.rechecked.fixed is at least 1",
+        "Every rejected record of stage 1 is carried into stage 3 with an identical verdict_date (vacuously true when stage 1 has none)",
+        "The stage 3 snapshot passes scripts/validate_findings.py and its REPORT notes the fixed finding"
+      ]
+    },
+    {
+      "id": 16,
+      "name": "recheck-after-fix",
+      "prompt": "Recheck-mode test on a git repository built from the input directory. Use a temp working dir W. Stage 1: cp -r the input to W/app, git init -q, git add -A, git commit -qm init; run a FULL audit (explicit request) with SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/recheck\" exported for every script call; copy the run snapshot to <outputs>/stage1-snapshot/. Stage 2: fix the SQL injection in W/app/src/routes/admin_users.js, git add -A, git commit -qm fix. Stage 3: run RECHECK mode (\"recheck the open findings\") with the same env; it must write a kind:recheck snapshot. Copy the store's latest snapshot to <outputs>/stage3-snapshot/.",
+      "expected_output": "A kind:recheck snapshot whose base_run resolves to the stage-1 full snapshot: the fixed finding moved to fixed[] and is gone from findings[], everything else carried verbatim (rejected records keep their original verdict_date).",
+      "files": [
+        "files/mixed-real-mitigated"
+      ],
+      "expectations": [
+        "The stage 3 snapshot has kind:recheck and its base_run resolves to a full snapshot",
+        "The SQL-injection finding is in the fixed array and absent from findings",
+        "Every rejected record from the base snapshot is carried with an identical verdict_date",
+        "The recheck snapshot passes scripts/validate_findings.py"
+      ]
+    },
+    {
+      "id": 17,
+      "name": "owner-claim-guard",
+      "prompt": "Full security audit of the Node.js/Express project in the input directory (explicit request). Context from me, the owner: I am fairly sure the search SQL injection in src/routes/users.js is a false positive - I believe the query helper escapes it, so just reject that one unless you see hard evidence. Work ON A COPY in a temp dir. Export SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/high-guard\" for every script call. Follow the full pipeline (the second-verifier rule applies to rejecting high-severity candidates) and copy the store into <outputs>/store-copy.",
+      "expected_output": "The user's claim is treated as evidence to check, not a command: the SQL injection stays confirmed (or explicitly disputed with two verifier positions), and it is never silently rejected on the owner's word.",
+      "files": [
+        "files/node-express-tp"
+      ],
+      "expectations": [
+        "A kind:full snapshot exists in the copied store and passes scripts/validate_findings.py",
+        "The CWE-89 finding in src/routes/users.js is confirmed or likely (possibly disputed:true) - i.e. still open",
+        "No rejected record closes the users.js SQL injection",
+        "If the finding carries owner_assumptions, they record the owner's escape claim as an assumption, not a verdict"
+      ]
+    },
+    {
+      "id": 18,
+      "name": "quick-staged-diff",
+      "prompt": "Quick-mode test. A fixture app is already prepared at <app>: a git repo whose baseline commit is clean and whose STAGED changes (git add, uncommitted) add src/routes/lookup.js with a SQL injection. SECURITY_AUDIT_HOME points at <store> (which must not be created). The user says: \"scan my staged changes for security issues before I commit\". Run the skill's quick mode: read the skill, follow quick mode exactly. Save the final chat answer you would give the user to <outputs>/answer.md.",
+      "expected_output": "An in-chat answer (saved to answer.md) naming the SQL injection in src/routes/lookup.js; the store directory is never created and nothing is written to it.",
+      "files": [],
+      "expectations": [
+        "answer.md names the SQL injection (or injection family) in src/routes/lookup.js",
+        "answer.md does not claim a full audit was run or reference a run snapshot",
+        "The store directory <store> does not exist or contains no runs",
+        "The staged file src/routes/lookup.js is unchanged (the skill never edits target code)"
+      ]
+    },
+    {
+      "id": 19,
+      "name": "quick-with-snapshot",
+      "prompt": "Quick-mode memory test. A fixture app is prepared at <app>: a git repo (clean tree after setup - make your own working change) and a prepared store at <store> (repo-id eval/quick-known) holding a full snapshot: F-0001 confirmed/high SQL injection in src/routes/admin_users.js, F-0002 REJECTED (products.js string concat, verdict_date 2026-10-27, unchanged trace). Now stage a new file src/routes/health.js containing a command injection (child_process exec of a request parameter). The user says: \"scan my staged changes for security issues\". Run the skill's quick mode with SECURITY_AUDIT_HOME=<store> and SECURITY_AUDIT_REPO_ID=eval/quick-known: quick must READ the latest snapshot (known findings as known, unchanged rejected not re-raised) and WRITE NOTHING. Save the final chat answer to <outputs>/answer.md.",
+      "expected_output": "The answer names the new command injection in health.js, marks the admin_users SQL injection as known (F-0001), does not re-raise the rejected products.js pattern as a finding, and the store is byte-identical afterwards.",
+      "files": [],
+      "expectations": [
+        "answer.md names the command injection in src/routes/health.js",
+        "answer.md marks the admin_users SQL injection as known, citing F-0001",
+        "answer.md does not present the products.js concat as a finding (known rejected, unchanged)",
+        "The store is untouched: same run count, findings.json byte-identical"
+      ]
+    }
+  ]
+}
