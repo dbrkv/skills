@@ -1,21 +1,20 @@
 ---
 name: code-security-review
 description: |
-  Security review of code the user owns: finds vulnerabilities by source-level
-  reasoning, verifies every candidate with an isolated refute-first validator,
-  and keeps run snapshots under ~/.security-audit so results survive between
-  sessions.
+  Security review of code: finds vulnerabilities by source-level reasoning,
+  verifies every candidate with an isolated refute-first validator, and keeps
+  run snapshots under ~/.security-audit so results survive between sessions.
 
-  Use when the user asks for a security review of their own code: reviewing
-  staged, uncommitted, commit, range, or branch changes; answering "is this
-  code secure?"; re-checking previously reported findings ("check F-0012",
-  "recheck the open findings"); or auditing a repository. Run the full pipeline
-  and write a run snapshot ONLY on an explicit audit or full-review request;
-  for questions and diff reviews answer in chat without writing files.
+  Use when the user asks for a security review of code: reviewing staged,
+  uncommitted, commit, range, or branch changes; answering "is this code
+  secure?"; re-checking previously reported findings ("check F-0012",
+  "recheck the open findings"); or auditing a repository, including one the
+  user just cloned. Run the full pipeline and write a run snapshot ONLY on an
+  explicit audit or full-review request; for questions and diff reviews answer
+  in chat without writing files.
 
   Do NOT trigger to explain security concepts, write security documentation,
-  configure scanners or CI (gitleaks, semgrep, Snyk, Dependabot), or review
-  third-party code the user does not maintain.
+  or configure scanners or CI (gitleaks, semgrep, Snyk, Dependabot).
 metadata:
   version: "2.0.0"
   user-invocable: "true"
@@ -35,14 +34,24 @@ persist between sessions as immutable run snapshots under `~/.security-audit/`.
 |------|--------------|--------|
 | **quick** (default) | Security questions and diff reviews: "is this secure?", staged / working / commit / range / branch scans | Answer in chat; writes nothing |
 | **full** | The user explicitly asks to audit the repository or to save the results | Phases 0–8; writes one run snapshot |
-| **recheck** | "check F-0012", "recheck the open findings" | Verifiers over known findings only; answer in chat |
+| **recheck** | "check F-0012", "recheck the open findings" | Verifiers over known findings only; answer in chat + a `kind: recheck` snapshot |
 
 If a request could mean two modes, ask one question before running the
 pipeline. Quick mode works in the current context: read the scope, hunt
 candidates (`references/scouts.md`), refute each one
 (`references/verification.md`), answer in chat; saving the results is a full
-run. Recheck loads the latest snapshot and runs only Phase 5 verifiers over the
-findings the user named, or over all open ones.
+run. Quick reads (never writes) the latest snapshot when one exists: known
+findings are reported as "known F-NNNN", and a rejected record whose trace
+code is unchanged is not re-raised. With subagents available, quick gives each
+surviving candidate one isolated verifier; without them it refutes in-context
+and says so ("validated in-context").
+
+Recheck loads the latest snapshot and runs only Phase 5 verifiers over the
+findings the user named, or over all open ones, then writes a `kind: recheck`
+snapshot: the previous findings with updated verdicts for those rechecked.
+`coverage.json` and `threat-model.md` are referenced, not rewritten. The
+latest snapshot of any kind is the current state; the next full run supersedes
+it.
 
 ## Hard rules
 
@@ -68,11 +77,11 @@ findings the user named, or over all open ones.
 
 ## Findings
 
-- **Id `F-NNNN`** is stable per repository: a fingerprint seen in any earlier snapshot keeps its id; new fingerprints take the next free number (`scripts/run_store.py next-id`).
-- **Fingerprint** `<path>::<symbol>::<root-cause>` — repo-relative path, enclosing symbol (route, handler, function), and the normalized sink snippet (1–3 lines, whitespace and comments stripped). Same fingerprint = same root cause. Full format: `references/data-schema.md`.
+- **Id `F-NNNN` is the primary key** — stable per repository, carried explicitly across runs, never recomputed from content. Phase 4 dedup matches candidates against the latest snapshot (it receives each known finding's id + fingerprint + title) and reuses the id for the same root cause; a `moved` finding keeps its id and appends the new fingerprint to `previous_fingerprints[]`. `scripts/run_store.py next-id` only issues numbers for genuinely new causes — it never matches.
+- **Fingerprint** `<path>::<symbol>::<root-cause-slug>` — repo-relative path, enclosing symbol (route, handler, function), and a short semantic slug of the root cause (e.g. `sql-concat-in-search`). CWE is a separate field; the code snippet is evidence, not identity — a reworded fix must not mint a new id. Full format: `references/data-schema.md`.
 - **Statuses**: `confirmed` / `likely` / `needs_review` / `rejected`.
-- **`rejected` records are kept in the snapshot and suppressed** from new candidates while the trace code is unchanged (`scripts/run_store.py trace-changed`) and the verdict is under 90 days old.
-- A claim the user calls "by design" or "fixed" is re-verified against the code, not dropped: the verifier treats the user's claim as evidence to check.
+- **`rejected` records are kept and suppressed** from new candidates while the trace code is unchanged (`scripts/run_store.py trace-changed`) and the original verdict is under 90 days old. When a rejected record is carried into a new snapshot, it keeps its original `verdict_date` and `verdict_source_ref` — the term never resets.
+- A claim the user calls "by design" or "fixed" is re-verified against the code, not dropped: the verifier treats the user's claim as evidence to check, and the assumption a rejection rests on is recorded in the finding's `owner_assumptions[]`.
 
 ## The full pipeline
 
@@ -83,14 +92,16 @@ findings the user named, or over all open ones.
 | 2 Scouts | One scout per surface × trust boundary hunts from invariants; candidates land on a JSONL board written only by the orchestrator. Each scout gets R1–R10, its threat classes, and the known-findings list (ids + titles only) | `references/scouts.md` |
 | 3 Coverage critic | A fresh agent names what went unchecked by surface and STRIDE category → one bounded follow-up scout wave; what remains open lands in the gap list | `references/scouts.md` |
 | 4 Dedup | Candidates merge by root cause before verification: one shared-helper cause with several entry points is one finding | `references/scouts.md` |
-| 5 Verification | One isolated refute-first verifier per root cause, fresh context. A HIGH/CRITICAL candidate may be rejected only when a second independent verifier agrees | `references/verification.md` |
+| 5 Verification | One isolated refute-first verifier per root cause, fresh context. A HIGH/CRITICAL candidate may be rejected only when a second independent verifier agrees; if the two disagree, the finding stays open (`likely` or `needs_review`) with `disputed: true` and both justifications | `references/verification.md` |
 | 6 Ranking | Severity from the impact anchors below | `references/verification.md` |
 | 7 Report | REPORT.md + one fresh reviewer checks the report against the code; it may correct details or downgrade with evidence, never upgrade | `references/verification.md` |
 | 8 Snapshot | Write threat-model.md, findings.json (validated by `scripts/validate_findings.py`), coverage.json, REPORT.md into the run dir | `references/data-schema.md` |
 
 When subagents are unavailable, every fan-out phase degrades to sequential
 passes in one context under the same contracts, and the snapshot records the
-degradation.
+degradation. Every REPORT.md states in its header what was not covered (from
+`coverage.json`), any degraded execution, and the owner assumptions rejections
+rest on; without coverage proof a report never calls the code clean.
 
 ## Scopes
 
