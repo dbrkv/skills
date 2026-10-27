@@ -12,11 +12,13 @@ implements the storage rules.
   computed repo-id outright (used when the target is a plain directory
   inside another git repository).
 - `<repo-id>`: the normalized `origin` URL — strip the scheme, credentials,
-  and `.git`; lowercase the host. Without a remote:
+  and `.git`; lowercase the host; lowercase the path on github.com,
+  gitlab.com, and bitbucket.org (case-insensitive hosts). Without a remote:
   `local-<first 12 hex of sha256 of the root commit>`, where the root commit
   is `git rev-list --max-parents=0 HEAD`.
-- Runs: `runs/<YYYY-MM-DD>-<n>/`, `<n>` starting at 1 per date. Snapshots are
-  immutable — a run never edits or deletes an earlier run.
+- Runs: `runs/<YYYY-MM-DD>-<n>/`, `<n>` starting at 1 per date; the date is
+  UTC (the same clock as `findings.date`, so run id and date never diverge).
+  Snapshots are immutable — a run never edits or deletes an earlier run.
 - Latest snapshot: the newest run of any kind — the current **findings**
   state. Latest full snapshot: the newest `kind: full` run — the current
   **coverage and threat-model** state. `latest-run` reports both.
@@ -55,9 +57,10 @@ safe.
   "degraded": false,
   "findings": ["<Finding>"],
   "rejected": ["<RejectedRecord>"],
+  "fixed": ["<FixedRecord>"],
   "suppressed": [{"id": "F-0003", "reason": "rejected 12 days ago, trace unchanged"}],
   "summary": {
-    "confirmed": 0, "likely": 0, "needs_review": 0, "rejected": 0, "disputed": 0,
+    "confirmed": 0, "likely": 0, "needs_review": 0, "rejected": 0, "fixed": 0, "disputed": 0,
     "rechecked": {"still_open": 0, "fixed": 0, "fixed_pending": 0, "moved": 0, "cant_tell": 0},
     "by_severity": {"critical": 0, "high": 0, "medium": 0, "low": 0}
   }
@@ -108,6 +111,11 @@ previous_fingerprints, title, threat_class, cwe, file, symbol), plus `reason`
 carried into a newer snapshot** — the 90-day suppression term runs from the
 original verdict.
 
+**FixedRecord** — `{id, fingerprint, title, evidence, recheck_date}`: a
+finding closed as `fixed` in this run. Fixed records are not carried into the
+next snapshot's findings; they remain the trace of when a root cause closed
+and the base for spotting a regression if the same fingerprint returns.
+
 ### Field rules
 
 - `id` (`F-NNNN`) is the primary key: unique within a snapshot, stable across
@@ -121,19 +129,22 @@ original verdict.
   identity — a reworded fix must not mint a new id.
 - `severity` present iff status is confirmed or likely. A disputed finding
   may carry severity (provisional); needs_review never does.
+- `source_ref` and `verdict_source_ref` are commit hexes (7–40 chars), never
+  a branch name or HEAD — a moving ref would suppress rejections forever.
 - A needs_review finding carries a `reason_code`: `missing_fact` (the
   verifier's unresolved fact — `missing_fact` is then required and
   non-empty), `validator_output_invalid`, or `not_validated` (the verifier
   cap) — the latter two carry `missing_fact: null`.
 - `owner_assumptions` lists the user-supplied or deployment facts a verdict
   rests on; REPORT.md renders them in a dedicated section.
-- `last_recheck` is `{date, result}` with result `still_open` | `fixed` |
-  `fixed_pending` | `moved` | `cant_tell`, set by the Phase 1 recheck pass or
-  recheck mode. A `fixed` finding is not carried into the next snapshot;
+- `last_recheck` is `{run_id, date, result}` with result `still_open` |
+  `fixed` | `fixed_pending` | `moved` | `cant_tell`, set by the Phase 1
+  recheck pass or recheck mode; `run_id` identifies which run rechecked it.
+  A `fixed` finding moves to the `fixed` array instead of `findings`;
   `fixed_pending` (the fix is visible only in an uncommitted tree) is carried
   until a later run confirms `fixed` on a committed state. The summary's
-  `rechecked` counts the rechecks whose `last_recheck.date` equals this run's
-  date.
+  `rechecked` counts rechecks with `last_recheck.run_id` equal to this run's
+  id, plus `fixed` = the length of the fixed array.
 - `summary` is derived from the arrays by counting — never authored.
 
 ## coverage.json
@@ -175,11 +186,13 @@ count from the findings.json `summary` — it never recomputes them.
 ## Validation (scripts/validate_findings.py)
 
 The validator fails the file when: the JSON is unparseable; `kind` is not
-full or recheck; ids are duplicated or malformed; a status, severity, or
-STRIDE token is unknown; severity sits on needs_review or is missing on
-confirmed/likely; a needs_review lacks a known `reason_code`, or
-`missing_fact` is non-empty exactly when `reason_code` is not `missing_fact`;
-a rejected record lacks `verdict_date` or `reason`; a recheck kind lacks a
-resolving `base_run` (it must point at a full snapshot); the summary counts
-disagree with the arrays; or `by_severity` does not sum to confirmed +
-likely.
+full or recheck; ids are duplicated (across findings, rejected, and fixed) or
+malformed; a status, severity, or STRIDE token is unknown; severity sits on
+needs_review or is missing on confirmed/likely; `source_ref` or a
+`verdict_source_ref` is not a commit hex (7–40); a needs_review lacks a known
+`reason_code`, or `missing_fact` is non-empty exactly when `reason_code` is
+not `missing_fact`; a rejected record lacks `verdict_date` or `reason`; a
+fixed record lacks fingerprint, title, evidence, or `recheck_date`; a recheck
+kind lacks a resolving `base_run` (it must point at a full snapshot); the
+summary counts disagree with the arrays (including `fixed` and `rechecked`);
+or `by_severity` does not sum to confirmed + likely.

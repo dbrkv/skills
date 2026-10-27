@@ -4,6 +4,8 @@
 Run: python3 scripts/test_scripts.py
 """
 
+from __future__ import annotations
+
 import hashlib
 import json
 import os
@@ -84,7 +86,7 @@ def finding(**over) -> dict:
         "reason_code": None,
         "recommended_fix": "parameterize",
         "verdict_date": "2026-10-27",
-        "verdict_source_ref": None,
+        "verdict_source_ref": "9f2c1e7",
         "last_recheck": None,
     }
     base.update(over)
@@ -105,35 +107,37 @@ def rejected(**over) -> dict:
         "evidence": [{"file": "src/config.js", "line": 3, "note": "constant"}],
         "owner_assumptions": [],
         "verdict_date": "2026-10-20",
-        "verdict_source_ref": None,
+        "verdict_source_ref": "abc1234",
     }
     base.update(over)
     return base
 
 
-def derive_summary(findings, rej, date="2026-10-27T12:00:00Z"):
+def derive_summary(findings, rej, date="2026-10-27T12:00:00Z", run_id="2026-10-27-1", fixed=()):
     counts = Counter(f["status"] for f in findings)
     sev = Counter(f.get("severity") for f in findings if f["status"] in ("confirmed", "likely"))
     rechecked = Counter(f["last_recheck"]["result"] for f in findings
-                        if (f.get("last_recheck") or {}).get("date") == date[:10])
+                        if (f.get("last_recheck") or {}).get("run_id") == run_id)
+    rechecked["fixed"] = len(fixed)
     return {
         "confirmed": counts["confirmed"], "likely": counts["likely"],
         "needs_review": counts["needs_review"], "rejected": len(rej),
+        "fixed": len(fixed),
         "disputed": sum(1 for f in findings if f.get("disputed")),
         "rechecked": {k: rechecked.get(k, 0) for k in RECHECK_RESULTS},
         "by_severity": {k: sev.get(k, 0) for k in SEVERITIES},
     }
 
 
-def snapshot_doc(kind="full", findings=(), rej=(), suppressed=(), base_run=None,
+def snapshot_doc(kind="full", findings=(), rej=(), suppressed=(), fixed=(), base_run=None,
                  date="2026-10-27T12:00:00Z", run_id="2026-10-27-1", summary=None):
     return {
         "kind": kind, "repo_id": "github.com/o/r", "run_id": run_id, "date": date,
         "base_run": base_run, "source_ref": "9f2c1e7", "dirty": False,
         "scope": {"type": "full", "ref": None}, "degraded": False,
-        "findings": list(findings), "rejected": list(rej),
+        "findings": list(findings), "rejected": list(rej), "fixed": list(fixed),
         "suppressed": list(suppressed),
-        "summary": summary if summary is not None else derive_summary(findings, rej, date),
+        "summary": summary if summary is not None else derive_summary(findings, rej, date, run_id, fixed),
     }
 
 
@@ -149,7 +153,7 @@ class RunStoreTests(unittest.TestCase):
         subprocess.run(["git", "-C", str(repo), "remote", "add", "origin",
                         "https://user:token@GitHub.COM:443/Owner/Repo.git/"], check=True)
         with store_env(self.home):
-            self.assertEqual(run_store.repo_id(repo), "github.com/Owner/Repo")
+            self.assertEqual(run_store.repo_id(repo), "github.com/owner/repo")
 
     def test_repo_id_scp_origin(self):
         repo = make_repo(self.base)
@@ -172,6 +176,75 @@ class RunStoreTests(unittest.TestCase):
                         "https://github.com/a/b.git"], check=True)
         with store_env(self.home, repo_id="eval-fixture-1"):
             self.assertEqual(run_store.repo_id(repo), "eval-fixture-1")
+
+    def test_repo_id_case_insensitive_hosts(self):
+        repo = make_repo(self.base)
+        subprocess.run(["git", "-C", str(repo), "remote", "add", "origin",
+                        "https://github.com/Owner/Repo.GIT"], check=True)
+        with store_env(self.home):
+            self.assertEqual(run_store.repo_id(repo), "github.com/owner/repo")
+        subprocess.run(["git", "-C", str(repo), "remote", "set-url", "origin",
+                        "https://Example.com/Owner/Repo"], check=True)
+        with store_env(self.home):
+            self.assertEqual(run_store.repo_id(repo), "example.com/Owner/Repo")
+
+    def test_run_ordering_ten_after_two(self):
+        repo = make_repo(self.base)
+        with store_env(self.home, repo_id="o/r"):
+            self.write_run("o/r", "2026-10-27-2", snapshot_doc(run_id="2026-10-27-2"))
+            self.write_run("o/r", "2026-10-27-10", snapshot_doc(run_id="2026-10-27-10"))
+            import io
+            buf = io.StringIO()
+            with mock.patch("sys.stdout", buf):
+                run_store.cmd_latest_run(repo)
+            out = json.loads(buf.getvalue())
+            self.assertIn("2026-10-27-10", out["latest"])
+            with mock.patch("sys.stdout", buf):
+                run_store.cmd_next_run_dir(repo)
+            self.assertTrue(str(buf.getvalue().strip()).endswith("-11"))
+
+    def test_repo_flag_positions(self):
+        repo = make_repo(self.base)
+        subprocess.run(["git", "-C", str(repo), "remote", "add", "origin",
+                        "https://github.com/a/b.git"], check=True)
+        import io
+        with store_env(self.home, repo_id="o/r"):
+            self.write_run("o/r", "2026-10-27-1", snapshot_doc(run_id="2026-10-27-1"))
+        variants = [
+            ["--repo", str(repo), "repo-id"],
+            ["repo-id", "--repo", str(repo)],
+            [f"--repo={repo}", "repo-id"],
+            ["--repo", str(repo), "trace-changed", "F-9999"],
+            ["trace-changed", "--repo", str(repo), "F-9999"],
+            ["trace-changed", "F-9999", "--repo", str(repo)],
+        ]
+        for argv in variants:
+            buf = io.StringIO()
+            env = store_env(self.home, repo_id="o/r") if "trace-changed" in argv else store_env(self.home)
+            with env, mock.patch("sys.stdout", buf):
+                code = 0
+                try:
+                    run_store.main(argv)
+                except SystemExit as e:
+                    code = e.code
+            if "repo-id" in argv:
+                self.assertEqual(buf.getvalue().strip(), "github.com/a/b")
+            else:
+                self.assertEqual(code, 1)  # unknown id, resolved in the right repo
+                self.assertIn("not found", buf.getvalue())
+
+    def test_trace_changed_non_hex_ref_fails_open(self):
+        repo = make_repo(self.base)
+        with store_env(self.home, repo_id="o/r"):
+            self.write_run("o/r", "2026-10-27-1",
+                           snapshot_doc(findings=[finding(verdict_source_ref="HEAD")]))
+            import io
+            buf = io.StringIO()
+            with mock.patch("sys.stdout", buf):
+                run_store.cmd_trace_changed(repo, "F-0001")
+            out = json.loads(buf.getvalue())
+            self.assertTrue(out["changed"])
+            self.assertIn("not a commit hex", out["detail"])
 
     def test_next_run_dir_sequence(self):
         repo = make_repo(self.base)
@@ -302,9 +375,54 @@ class ValidatorTests(unittest.TestCase):
         self.validate(snapshot_doc(run_id="2026-10-26-1"), name="2026-10-26-1")
         doc = snapshot_doc(kind="recheck", base_run="2026-10-26-1", run_id="2026-10-27-2",
                            date="2026-10-27T15:00:00Z",
-                           findings=[finding(last_recheck={"date": "2026-10-27", "result": "fixed_pending"})])
+                           findings=[finding(last_recheck={"run_id": "2026-10-27-2",
+                                                            "date": "2026-10-27",
+                                                            "result": "fixed_pending"})],
+                           fixed=[{"id": "F-0009", "fingerprint": "src/x.js::f::y",
+                                   "title": "closed", "evidence": [{"file": "src/x.js", "line": 1, "note": "control added"}],
+                                   "recheck_date": "2026-10-27"}])
         errs = self.validate(doc, name="2026-10-27-2")
         self.assertEqual(errs, [])
+
+    def test_fixed_array_rules(self):
+        fixed_entry = {"id": "F-0009", "fingerprint": "src/x.js::f::y", "title": "closed",
+                       "evidence": [{"file": "src/x.js", "line": 1, "note": "control added"}],
+                       "recheck_date": "2026-10-27"}
+        ok = snapshot_doc(fixed=[fixed_entry])
+        self.assertEqual(self.validate(ok), [])
+
+        dup = snapshot_doc(findings=[finding(id="F-0009")], fixed=[fixed_entry])
+        errs = self.validate(dup)
+        self.assertTrue(any("duplicate id" in e for e in errs))
+
+        mismatch = snapshot_doc(fixed=[fixed_entry])
+        mismatch["summary"]["rechecked"]["fixed"] = 0
+        mismatch["summary"]["fixed"] = 0
+        errs = self.validate(mismatch)
+        self.assertTrue(any("summary.rechecked.fixed" in e for e in errs))
+        self.assertTrue(any(e.startswith("summary.fixed") for e in errs))
+
+        no_evidence = snapshot_doc(fixed=[dict(fixed_entry, evidence=[])])
+        errs = self.validate(no_evidence)
+        self.assertTrue(any("fixed records require evidence" in e for e in errs))
+
+    def test_hex_ref_rules(self):
+        errs = self.validate(snapshot_doc(findings=[finding(verdict_source_ref="HEAD")]))
+        self.assertTrue(any("verdict_source_ref" in e and "commit hex" in e for e in errs))
+        doc = snapshot_doc(rej=[rejected()])
+        doc["source_ref"] = "main"
+        errs = self.validate(doc)
+        self.assertTrue(any("source_ref" in e and "commit hex" in e for e in errs))
+
+    def test_rechecked_counts_by_run_id_not_date(self):
+        carried = finding(last_recheck={"run_id": "2026-10-27-1", "date": "2026-10-27",
+                                        "result": "still_open"})
+        doc = snapshot_doc(findings=[carried], run_id="2026-10-27-2",
+                           date="2026-10-27T18:00:00Z")   # second run the same day
+        self.assertEqual(self.validate(doc), [])          # morning recheck not recounted
+        doc["summary"]["rechecked"]["still_open"] = 1
+        errs = self.validate(doc)
+        self.assertTrue(any("summary.rechecked.still_open" in e for e in errs))
 
     def test_duplicate_and_malformed_ids(self):
         errs = self.validate(snapshot_doc(findings=[finding(), finding(id="F-0001")]))
@@ -348,7 +466,7 @@ class ValidatorTests(unittest.TestCase):
 
     def test_summary_reconciliation(self):
         doc = snapshot_doc(findings=[finding()], summary={
-            "confirmed": 2, "likely": 0, "needs_review": 0, "rejected": 0, "disputed": 0,
+            "confirmed": 2, "likely": 0, "needs_review": 0, "rejected": 0, "fixed": 0, "disputed": 0,
             "rechecked": {k: 0 for k in RECHECK_RESULTS},
             "by_severity": {k: 0 for k in SEVERITIES},
         })
@@ -367,7 +485,7 @@ class ValidatorTests(unittest.TestCase):
         self.assertTrue(any("does not resolve" in e for e in errs))
 
     def test_last_recheck_recount(self):
-        f = finding(last_recheck={"date": "2026-10-27", "result": "still_open"})
+        f = finding(last_recheck={"run_id": "2026-10-27-1", "date": "2026-10-27", "result": "still_open"})
         doc = snapshot_doc(findings=[f])
         self.assertEqual(self.validate(doc), [])
         doc["summary"]["rechecked"]["still_open"] = 0

@@ -210,9 +210,10 @@ Phase 5.
    as evidence to check. The verdicts use the recheck contract above.
 4. Write a `kind: recheck` snapshot: `findings.json` holds the base
    snapshot's findings with updated verdicts for the rechecked ids —
-   everything else verbatim, rejected records keep their original
-   `verdict_date`; `REPORT.md` covers the rechecked subset; `base_run` names
-   the base **full** snapshot (a recheck never chains onto another recheck);
+   findings closed as `fixed` this run move to the `fixed` array; everything
+   else verbatim, rejected records keep their original `verdict_date`;
+   `REPORT.md` covers the rechecked subset; `base_run` names the base
+   **full** snapshot (a recheck never chains onto another recheck);
    `threat-model.md` and `coverage.json` are referenced, not rewritten.
    Validate with `scripts/validate_findings.py`.
 5. Answer in chat: per-finding verdicts with one-line reasons.

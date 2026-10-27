@@ -99,8 +99,9 @@ A `fixed` or `fixed_pending` result for a finding whose severity is high or
 critical requires a second independent verifier's agreement; disagreement
 keeps the finding `still_open` with `disputed: true` (the second-verifier
 rule in `verification.md`). A `fixed` finding is absent from the new
-snapshot; `fixed_pending` is carried until a later run confirms `fixed` on a
-committed state (clean tree, or a ref that contains the fix).
+snapshot's findings — it is recorded in that snapshot's `fixed` array with
+its evidence; `fixed_pending` is carried until a later run confirms `fixed`
+on a committed state (clean tree, or a ref that contains the fix).
 
 **Rejected records.** Each rejected record from the latest snapshot is run
 through `scripts/run_store.py trace-changed <id>`:

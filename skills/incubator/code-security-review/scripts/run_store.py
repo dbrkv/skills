@@ -3,33 +3,40 @@
 
 Storage layout (see references/data-schema.md):
 
-    $SECURITY_AUDIT_HOME (default ~/.security-audit)/<repo-id>/runs/<YYYY-MM-DD>-<n>/
+    $SECURITY_AUDIT_HOME (default ~/.security-audit)/<repo-id>/runs/<UTC-date>-<n>/
 
-Subcommands:
+Subcommands (--repo PATH is accepted before or after the subcommand):
 
-    repo-id [--repo PATH]            print the repository id
-    latest-run [--repo PATH]         JSON: latest snapshot (any kind) + latest full snapshot
-    next-run-dir [--repo PATH]       print the next run directory path (not created)
-    next-id [--repo PATH]            print the next free F-NNNN across all snapshots
-    trace-changed ID [--repo PATH]   JSON: did the record's trace code change?
+    repo-id            print the repository id
+    latest-run         JSON: latest snapshot (any kind) + latest full snapshot
+    next-run-dir       print the next run directory path (not created)
+    next-id            print the next free F-NNNN across all snapshots
+    trace-changed ID   JSON: did the record's trace code change?
 
 repo-id resolution: $SECURITY_AUDIT_REPO_ID wins; then the normalized origin
-URL; without a remote, local-<sha256 of the root commit, first 12 hex>; a
-non-git directory falls back to a path hash (prefer the env override).
-Stdlib only.
+URL (owner/repo lowercased on github.com, gitlab.com, bitbucket.org); without
+a remote, local-<sha256 of the root commit, first 12 hex>; a non-git
+directory falls back to a path hash (prefer the env override).
+Python 3.8+, stdlib only.
 """
 
+from __future__ import annotations
+
+import argparse
 import hashlib
 import json
 import os
 import re
 import subprocess
 import sys
-from datetime import date
+from datetime import datetime, timezone
 from pathlib import Path
 
 DEFAULT_PORTS = {"22", "80", "443"}
+CASE_INSENSITIVE_HOSTS = {"github.com", "gitlab.com", "bitbucket.org"}
 ID_RE = re.compile(r"^F-(\d+)$")
+RUN_NAME_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})-(\d+)$")
+HEX_REF_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
 
 
 def store_root() -> Path:
@@ -52,8 +59,10 @@ def normalize_origin(url: str) -> str:
     _user, host, port, path = m.groups()
     host = host.lower()
     path = path.rstrip("/")
-    if path.endswith(".git"):
+    if path.lower().endswith(".git"):
         path = path[: -len(".git")]
+    if host in CASE_INSENSITIVE_HOSTS:
+        path = path.lower()
     if port and port not in DEFAULT_PORTS:
         host = f"{host}:{port}"
     return f"{host}/{path}"
@@ -77,6 +86,12 @@ def runs_dir(repo: Path) -> Path:
     return store_root() / repo_id(repo) / "runs"
 
 
+def run_sort_key(d: Path):
+    """Sort runs by (date, n) — lexicographic order breaks at n=10."""
+    m = RUN_NAME_RE.match(d.name)
+    return (m.group(1), int(m.group(2))) if m else (d.name, -1)
+
+
 def read_kind(run: Path):
     f = run / "findings.json"
     if not f.is_file():
@@ -87,15 +102,12 @@ def read_kind(run: Path):
         return None
 
 
-def snapshot_runs(repo: Path) -> list[Path]:
+def snapshot_runs(repo: Path) -> list:
     runs = runs_dir(repo)
     if not runs.is_dir():
         return []
-    out = []
-    for d in sorted(runs.iterdir()):
-        if d.is_dir() and (d / "findings.json").is_file():
-            out.append(d)
-    return out
+    candidates = [d for d in runs.iterdir() if d.is_dir() and (d / "findings.json").is_file()]
+    return sorted(candidates, key=run_sort_key)
 
 
 def cmd_repo_id(repo: Path) -> None:
@@ -118,13 +130,13 @@ def cmd_latest_run(repo: Path) -> None:
 
 def cmd_next_run_dir(repo: Path) -> None:
     runs = runs_dir(repo)
-    today = date.today().isoformat()
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     n = 0
     if runs.is_dir():
         for d in runs.iterdir():
-            m = re.match(rf"^{re.escape(today)}-(\d+)$", d.name)
-            if d.is_dir() and m:
-                n = max(n, int(m.group(1)))
+            m = RUN_NAME_RE.match(d.name)
+            if d.is_dir() and m and m.group(1) == today:
+                n = max(n, int(m.group(2)))
     print(runs / f"{today}-{n + 1}")
 
 
@@ -135,7 +147,9 @@ def cmd_next_id(repo: Path) -> None:
             data = json.loads((run / "findings.json").read_text())
         except (json.JSONDecodeError, OSError):
             continue
-        for record in data.get("findings", []) + data.get("rejected", []):
+        records = (data.get("findings", []) + data.get("rejected", [])
+                   + data.get("fixed", []))
+        for record in records:
             m = ID_RE.match(str(record.get("id", "")))
             if m:
                 mx = max(mx, int(m.group(1)))
@@ -166,45 +180,57 @@ def cmd_trace_changed(repo: Path, finding_id: str) -> None:
         out.update(changed=True, detail="not a git repository")
     elif not ref:
         out.update(changed=True, detail="record has no verdict_source_ref")
-    elif git(repo, "cat-file", "-e", f"{ref}^{{commit}}").returncode != 0:
-        out.update(changed=True, detail=f"ref {ref} unavailable")
-    elif not paths:
-        out.update(changed=False, detail="record has no trace paths")
+    elif not HEX_REF_RE.match(str(ref)):
+        out.update(changed=True, detail=f"verdict_source_ref {ref!r} is not a commit hex (7-40)")
     else:
-        diff = git(repo, "diff", "--name-only", ref, "--", *paths)
-        status = git(repo, "status", "--porcelain", "--", *paths)
-        touched = [l for l in (diff.stdout + status.stdout).splitlines() if l.strip()]
-        if touched:
-            out.update(changed=True, detail=f"changed since {ref}: " + ", ".join(touched[:5]))
+        ref = str(ref).lower()
+        if git(repo, "cat-file", "-e", f"{ref}^{{commit}}").returncode != 0:
+            out.update(changed=True, detail=f"ref {ref} unavailable")
+        elif not paths:
+            out.update(changed=False, detail="record has no trace paths")
         else:
-            out.update(changed=False, detail=f"trace unchanged since {ref}")
+            diff = git(repo, "diff", "--name-only", ref, "--", *paths)
+            status = git(repo, "status", "--porcelain", "--", *paths)
+            touched = [l for l in (diff.stdout + status.stdout).splitlines() if l.strip()]
+            if touched:
+                out.update(changed=True, detail=f"changed since {ref}: " + ", ".join(touched[:5]))
+            else:
+                out.update(changed=False, detail=f"trace unchanged since {ref}")
     print(json.dumps(out))
 
 
-def main(argv: list[str]) -> None:
-    args = [a for a in argv[1:] if not a.startswith("--repo")]
-    repo = Path(argv[argv.index("--repo") + 1]) if "--repo" in argv else Path.cwd()
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="run_store.py",
+                                description="Run-store helpers for code-security-review.")
+    p.add_argument("--repo", default=".", help="target repository path (default: cwd)")
+    sub = p.add_subparsers(dest="cmd", metavar="COMMAND")
+
+    def add(name):
+        sp = sub.add_parser(name)
+        sp.add_argument("--repo", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+        return sp
+
+    add("repo-id")
+    add("latest-run")
+    add("next-run-dir")
+    add("next-id")
+    tc = add("trace-changed")
+    tc.add_argument("id", help="finding id, e.g. F-0012")
+    return p
+
+
+def main(argv=None) -> None:
+    args = build_parser().parse_args(argv)
+    repo = Path(getattr(args, "repo", ".") or ".")
     cmds = {
         "repo-id": lambda: cmd_repo_id(repo),
         "latest-run": lambda: cmd_latest_run(repo),
         "next-run-dir": lambda: cmd_next_run_dir(repo),
         "next-id": lambda: cmd_next_id(repo),
+        "trace-changed": lambda: cmd_trace_changed(repo, args.id),
     }
-    if not args:
-        print(__doc__)
-        sys.exit(2)
-    cmd, rest = args[0], args[1:]
-    if cmd == "trace-changed":
-        if not rest:
-            print("usage: trace-changed ID [--repo PATH]", file=sys.stderr)
-            sys.exit(2)
-        cmd_trace_changed(repo, rest[0])
-    elif cmd in cmds:
-        cmds[cmd]()
-    else:
-        print(f"unknown command: {cmd}", file=sys.stderr)
-        sys.exit(2)
+    cmds[args.cmd]()
 
 
 if __name__ == "__main__":
-    main(sys.argv)
+    main()

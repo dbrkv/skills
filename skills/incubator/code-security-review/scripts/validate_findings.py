@@ -3,8 +3,10 @@
 
 Usage: validate_findings.py PATH
 Prints "OK" and exits 0 when the file passes; otherwise prints every error
-and exits 1. Stdlib only.
+and exits 1. Python 3.8+, stdlib only.
 """
+
+from __future__ import annotations
 
 import json
 import re
@@ -20,6 +22,11 @@ REASON_CODES = {"missing_fact", "validator_output_invalid", "not_validated"}
 RECHECK_RESULTS = {"still_open", "fixed", "fixed_pending", "moved", "cant_tell"}
 ID_RE = re.compile(r"^F-\d{4,}$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+HEX_REF_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
+
+
+def bad_hex(field, value, where):
+    return f"{where}: {field} must be a commit hex (7-40 chars), got {value!r}"
 
 
 def validate(data: dict, path: Path) -> list:
@@ -31,11 +38,14 @@ def validate(data: dict, path: Path) -> list:
     kind = data.get("kind")
     if kind not in KINDS:
         err(f"kind must be full or recheck, got {kind!r}")
-    for field in ("repo_id", "run_id", "date", "source_ref"):
+    for field in ("repo_id", "run_id", "date"):
         if not data.get(field):
             err(f"missing required field: {field}")
+    if not HEX_REF_RE.match(str(data.get("source_ref", ""))):
+        err(bad_hex("source_ref", data.get("source_ref"), "top level"))
     findings = data.get("findings")
     rejected = data.get("rejected")
+    fixed = data.get("fixed", [])
     summary = data.get("summary")
     if not isinstance(findings, list):
         err("findings must be a list")
@@ -43,12 +53,15 @@ def validate(data: dict, path: Path) -> list:
     if not isinstance(rejected, list):
         err("rejected must be a list")
         rejected = []
+    if not isinstance(fixed, list):
+        err("fixed must be a list")
+        fixed = []
     if not isinstance(summary, dict):
         err("summary must be an object")
         summary = {}
 
     seen_ids = set()
-    for group, records in (("findings", findings), ("rejected", rejected)):
+    for group, records in (("findings", findings), ("rejected", rejected), ("fixed", fixed)):
         for i, rec in enumerate(records):
             where = f"{group}[{i}]"
             fid = rec.get("id")
@@ -57,6 +70,8 @@ def validate(data: dict, path: Path) -> list:
             elif fid in seen_ids:
                 err(f"{where}: duplicate id {fid}")
             seen_ids.add(fid)
+            if group == "fixed":
+                continue
             for field in ("fingerprint", "title", "threat_class", "file", "symbol"):
                 if not rec.get(field):
                     err(f"{where} ({fid}): missing {field}")
@@ -67,6 +82,8 @@ def validate(data: dict, path: Path) -> list:
                 err(f"{where} ({fid}): unknown stride {rec['stride']!r}")
             if not isinstance(rec.get("owner_assumptions", []), list):
                 err(f"{where} ({fid}): owner_assumptions must be a list")
+            if not HEX_REF_RE.match(str(rec.get("verdict_source_ref", ""))):
+                err(bad_hex("verdict_source_ref", rec.get("verdict_source_ref"), f"{where} ({fid})"))
 
     for i, rec in enumerate(findings):
         fid = rec.get("id", "?")
@@ -99,6 +116,8 @@ def validate(data: dict, path: Path) -> list:
                 err(f"{where}: disputed requires both verifier_reasons (>= 2)")
         lr = rec.get("last_recheck")
         if lr is not None:
+            if not lr.get("run_id"):
+                err(f"{where}: last_recheck.run_id is required")
             if not DATE_RE.match(str(lr.get("date", ""))):
                 err(f"{where}: last_recheck.date must be YYYY-MM-DD")
             if lr.get("result") not in RECHECK_RESULTS:
@@ -111,6 +130,15 @@ def validate(data: dict, path: Path) -> list:
             err(f"{where}: rejected requires verdict_date (YYYY-MM-DD), got {rec.get('verdict_date')!r}")
         if not rec.get("reason"):
             err(f"{where}: rejected requires a reason")
+
+    for i, rec in enumerate(fixed):
+        fid = rec.get("id", "?")
+        where = f"fixed[{i}] ({fid})"
+        for field in ("fingerprint", "title", "evidence"):
+            if not rec.get(field):
+                err(f"{where}: fixed records require {field}")
+        if not DATE_RE.match(str(rec.get("recheck_date", ""))):
+            err(f"{where}: fixed records require recheck_date (YYYY-MM-DD)")
 
     suppressed = data.get("suppressed", [])
     rejected_ids = {r.get("id") for r in rejected}
@@ -145,6 +173,8 @@ def validate(data: dict, path: Path) -> list:
             err(f"summary.{key}={summary.get(key)!r} but arrays hold {counts[key]}")
     if summary.get("rejected") != len(rejected):
         err(f"summary.rejected={summary.get('rejected')!r} but rejected holds {len(rejected)}")
+    if summary.get("fixed") != len(fixed):
+        err(f"summary.fixed={summary.get('fixed')!r} but fixed holds {len(fixed)}")
     disputed_n = sum(1 for rec in findings if rec.get("disputed"))
     if summary.get("disputed") != disputed_n:
         err(f"summary.disputed={summary.get('disputed')!r} but arrays hold {disputed_n}")
@@ -157,16 +187,17 @@ def validate(data: dict, path: Path) -> list:
             err(f"summary.by_severity.{sev}={by_sev.get(sev)!r} but arrays hold {sev_counts.get(sev, 0)}")
     if sum(by_sev.values()) != reported:
         err(f"summary.by_severity sums to {sum(by_sev.values())} but confirmed+likely = {reported}")
-    run_day = str(data.get("date", ""))[:10]
+    run_id = data.get("run_id")
     rechecked = Counter(rec["last_recheck"]["result"] for rec in findings
-                        if (rec.get("last_recheck") or {}).get("date") == run_day)
+                        if (rec.get("last_recheck") or {}).get("run_id") == run_id)
     re_summary = summary.get("rechecked", {})
     if not isinstance(re_summary, dict):
         err("summary.rechecked must be an object")
         re_summary = {}
     for result in RECHECK_RESULTS:
-        if re_summary.get(result, 0) != rechecked.get(result, 0):
-            err(f"summary.rechecked.{result}={re_summary.get(result)!r} but arrays hold {rechecked.get(result, 0)}")
+        want = len(fixed) if result == "fixed" else rechecked.get(result, 0)
+        if re_summary.get(result, 0) != want:
+            err(f"summary.rechecked.{result}={re_summary.get(result)!r} but the arrays hold {want}")
 
     return errs
 
