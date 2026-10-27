@@ -31,7 +31,7 @@ def bad_hex(field, value, where):
     return f"{where}: {field} must be a commit hex (7-40 chars), got {value!r}"
 
 
-def validate(data: dict, path: Path) -> list:
+def validate(data: dict, path: Path, prev: dict = None) -> list:
     errs = []
 
     def err(msg):
@@ -147,6 +147,12 @@ def validate(data: dict, path: Path) -> list:
                 err(f"{where}: fixed records require {field}")
         if not DATE_RE.match(str(rec.get("recheck_date", ""))):
             err(f"{where}: fixed records require recheck_date (YYYY-MM-DD)")
+        if rec.get("validated_in_context"):
+            sev = rec.get("severity")
+            if sev not in ("medium", "low"):
+                err(f"{where}: a fixed record closed by an in-context verdict "
+                    f"requires a provisional severity of medium or low, got {sev!r} "
+                    "(a high/critical finding is never closed in-context)")
 
     suppressed = data.get("suppressed", [])
     rejected_ids = {r.get("id") for r in rejected}
@@ -211,15 +217,16 @@ def validate(data: dict, path: Path) -> list:
     # writes one; a recheck references the base full snapshot's).
     coverage_file = path.parent / "coverage.json"
     if coverage_file.is_file():
-        errs += validate_coverage(coverage_file, data)
+        errs += validate_coverage(coverage_file, data, prev)
 
     return errs
 
 
-def validate_coverage(coverage_path: Path, data: dict) -> list:
+def validate_coverage(coverage_path: Path, data: dict, prev: dict = None) -> list:
     """Degradation accounting: phases are known tokens, every listed finding
-    id resolves in this snapshot, and the findings.json `degraded` flag is
-    true exactly when either degradation list is non-empty."""
+    id resolves in this snapshot, the findings.json `degraded` flag is true
+    exactly when either degradation list is non-empty, and no in-context
+    verdict hides behind a missing `validated_in_context` flag."""
     errs = []
     try:
         cov = json.loads(coverage_path.read_text())
@@ -257,6 +264,27 @@ def validate_coverage(coverage_path: Path, data: dict) -> list:
         state = "non-empty" if (phases or fids) else "empty"
         errs.append(f"degraded={degraded} but coverage.json degradation lists are {state}: "
                     "the flag is true exactly when either list is non-empty")
+
+    # The in-context severity rules key off the flag, so the flag itself must
+    # not be optional where degradation says the verdict ran in-context.
+    for key in ("rejected", "fixed"):
+        for rec in data.get(key) or []:
+            if isinstance(rec, dict) and rec.get("id") in fids and not rec.get("validated_in_context"):
+                errs.append(f"{key} {rec.get('id')}: listed in coverage.json degradation.findings "
+                            "but lacks validated_in_context: true")
+    if "verification" in phases:
+        run_date = str(data.get("date", ""))[:10]
+        prev_rej = {r.get("id"): r for r in (prev or {}).get("rejected", []) if isinstance(r, dict)}
+        for rec in data.get("rejected") or []:
+            if not isinstance(rec, dict) or rec.get("validated_in_context"):
+                continue
+            base = prev_rej.get(rec.get("id"))
+            if base is not None and base.get("verdict_date") == rec.get("verdict_date"):
+                continue                  # carried verbatim from an earlier run
+            if rec.get("verdict_date") != run_date:
+                continue                  # an older verdict, not made in this run
+            errs.append(f"rejected {rec.get('id')}: verdict made in this run while verification "
+                        "ran in-context, but lacks validated_in_context: true")
     return errs
 
 
@@ -290,17 +318,27 @@ def validate_board(board_path: Path, data: dict) -> list:
     return errs
 
 
-def validate_prev(prev_path: Path, data: dict) -> list:
-    """Rejected records carried without re-verify (same verdict_date as the
-    base snapshot) must match the base record byte-for-byte."""
-    errs = []
+def load_prev(prev_path: Path):
+    """Return (snapshot, error) for --prev RUN-DIR or a findings.json path."""
     prev_file = prev_path / "findings.json" if prev_path.is_dir() else Path(prev_path)
     try:
         prev = json.loads(prev_file.read_text())
     except (json.JSONDecodeError, OSError) as e:
-        return [f"--prev {prev_path}: unreadable ({e})"]
+        return None, f"--prev {prev_path}: unreadable ({e})"
     if not isinstance(prev, dict):
-        return [f"--prev {prev_path}: not a snapshot"]
+        return None, f"--prev {prev_path}: not a snapshot"
+    return prev, None
+
+
+def validate_prev(prev, data: dict) -> list:
+    """Rejected records carried without re-verify (same verdict_date as the
+    base snapshot) must match the base record byte-for-byte. `prev` is a
+    loaded snapshot or a path for load_prev."""
+    errs = []
+    if not isinstance(prev, dict):
+        prev, prev_err = load_prev(Path(prev))
+        if prev_err:
+            return [prev_err]
     prev_rej = {r.get("id"): r for r in prev.get("rejected", [])}
     for rec in data.get("rejected", []):
         rid = rec.get("id")
@@ -348,11 +386,17 @@ def main(argv):
     except (json.JSONDecodeError, OSError) as e:
         print(f"ERROR: {e}")
         return 1
-    errs = validate(data, path)
+    prev_data = None
+    errs = []
+    if prev is not None:
+        prev_data, prev_err = load_prev(prev)
+        if prev_err:
+            errs.append(prev_err)
+    errs += validate(data, path, prev_data)
     if board is not None:
         errs += validate_board(board, data)
-    if prev is not None:
-        errs += validate_prev(prev, data)
+    if prev_data is not None:
+        errs += validate_prev(prev_data, data)
     if errs:
         for e in errs:
             print(f"ERROR: {e}")

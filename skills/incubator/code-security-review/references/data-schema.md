@@ -122,8 +122,9 @@ when a rejected record is carried into a newer snapshot** — the 90-day
 suppression term runs from the original verdict.
 
 **FixedRecord** — `{id, fingerprint, title, evidence, recheck_date}`, plus
-`validated_in_context` when the closing recheck verdict was produced
-in-context: a finding closed as `fixed` in this run. Fixed records are not
+`validated_in_context` and the finding's `severity` when the closing recheck
+verdict was produced in-context (only medium/low may close that way): a
+finding closed as `fixed` in this run. Fixed records are not
 carried into the next snapshot's findings; they remain the trace of when a
 root cause closed and the base for spotting a regression if the same
 fingerprint returns.
@@ -156,8 +157,9 @@ fingerprint returns.
   failed twice — see `verification.md`) — the latter three carry
   `missing_fact: null`.
 - `validated_in_context: true` marks a record whose verdict was produced in
-  the orchestrator's context (linear mode, or a re-run after a verifier
-  failed) instead of by an isolated verifier; the id is listed in
+  the orchestrator's context (linear mode, or a medium/low finding verified
+  in-context after its verifier launch failed twice) instead of by an
+  isolated verifier; the id is listed in
   `coverage.json.degradation.findings`. A rejected record resting on an
   in-context verdict must carry a provisional `severity` of medium or low —
   a high/critical candidate is never refuted in-context
@@ -261,14 +263,20 @@ not `missing_fact`; a rejected record lacks `verdict_date` or `reason`; a
 rejected record marked `validated_in_context` lacks a provisional `severity`
 or sits above medium (a high/critical candidate is never refuted
 in-context); a fixed record lacks fingerprint, title, evidence, or
-`recheck_date`; a recheck kind lacks a resolving `base_run` (it must point at
+`recheck_date`, or is marked `validated_in_context` without a `severity` of
+medium or low; a recheck kind lacks a resolving `base_run` (it must point at
 a full snapshot); the summary counts disagree with the arrays (including
 `fixed` and `rechecked`); or `by_severity` does not sum to confirmed +
 likely. When a sibling `coverage.json` exists in the run directory (full
 snapshots), it also checks degradation accounting: `phases` holds only the
 five known phase tokens, every id in `degradation.findings` resolves to a
-record in this snapshot, and the findings.json `degraded` flag is true
-exactly when either degradation list is non-empty. With `--board
+record in this snapshot, the findings.json `degraded` flag is true
+exactly when either degradation list is non-empty, and the flag cannot be
+omitted where the verdict ran in-context: a rejected or fixed record whose id
+is in `degradation.findings` must carry `validated_in_context: true`, and
+when `verification` is a degraded phase, so must every rejected record whose
+verdict was made in this run (`verdict_date` equals the run date and it is
+not carried verbatim from `--prev`). With `--board
 candidates.jsonl`, it additionally fails when any board candidate id is not
 accounted for in a finding's or rejected record's `merged_from` or a
 suppressed entry's `candidates` — no candidate may vanish between the board

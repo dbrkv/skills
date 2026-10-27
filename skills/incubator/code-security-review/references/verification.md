@@ -107,10 +107,14 @@ a fresh verifier; a second failure → `needs_review` with
 `reason_code: "validator_output_invalid"` and `missing_fact: null`.
 
 **Failed launch** (the agent-launching tool is missing, or the call returned
-an error): same retry — once with a fresh verifier; a second failure →
-`needs_review` with `reason_code: "no_independent_verifier"` and
-`missing_fact: null`, and the id lands in `coverage.json.degradation.findings`.
-A failed launch is not an invalid output: no verdict was produced at all.
+an error): same retry — once with a fresh verifier. On a second failure the
+id lands in `coverage.json.degradation.findings` and the linear-mode rules
+below apply to that one finding: a high/critical candidate (or a
+high/critical close in recheck) goes straight to `needs_review` with
+`reason_code: "no_independent_verifier"` and `missing_fact: null` (recheck:
+`still_open`); a medium/low one may be verified in-context and is marked
+`validated_in_context: true`. A failed launch is not an invalid output: no
+isolated verdict was produced at all.
 
 **Verifier cap.** More than 20 root causes after dedup → verify in
 `severity_guess` descending order (ties broken by confidence, then file

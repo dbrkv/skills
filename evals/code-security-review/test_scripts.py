@@ -434,12 +434,12 @@ class ValidatorTests(unittest.TestCase):
         self.base = Path(self.tmp.name)
         self.addCleanup(self.tmp.cleanup)
 
-    def validate(self, doc, name="2026-10-27-1", kind_file=True):
+    def validate(self, doc, name="2026-10-27-1", kind_file=True, prev=None):
         run = self.base / "runs" / name
         run.mkdir(parents=True, exist_ok=True)
         path = run / "findings.json"
         path.write_text(json.dumps(doc))
-        return validate_findings.validate(doc, path)
+        return validate_findings.validate(doc, path, prev)
 
     def test_valid_full(self):
         f1 = finding()
@@ -575,7 +575,7 @@ class ValidatorTests(unittest.TestCase):
         # flag must mirror the lists exactly
         flag_off = snapshot_doc(findings=[finding()])
         errs = with_coverage({"degradation": deg}, flag_off)
-        self.assertTrue(any("degraded=False" in e or "degraded=False but" in e for e in errs))
+        self.assertTrue(any("degraded=False" in e for e in errs))
         flag_on = snapshot_doc()
         flag_on["degraded"] = True
         errs = with_coverage({"degradation": {"phases": [], "findings": []}}, flag_on)
@@ -592,11 +592,58 @@ class ValidatorTests(unittest.TestCase):
         # a fixed record also resolves (in-context fixed on a medium)
         fx = {"id": "F-0009", "fingerprint": "src/x.js::f::y", "title": "closed",
               "evidence": [{"file": "src/x.js", "line": 1, "note": "control added"}],
-              "recheck_date": "2026-10-27", "validated_in_context": True}
+              "recheck_date": "2026-10-27", "validated_in_context": True,
+              "severity": "medium"}
         doc = snapshot_doc(fixed=[fx])
         doc["degraded"] = True
         self.assertEqual(with_coverage({"degradation": {"phases": ["verification"],
                                                         "findings": ["F-0009"]}}, doc), [])
+
+    def test_in_context_flag_cannot_be_omitted(self):
+        run = self.base / "runs" / "2026-10-27-1"
+        run.mkdir(parents=True, exist_ok=True)
+
+        def with_coverage(deg, doc, prev=None):
+            (run / "coverage.json").write_text(json.dumps({"degradation": deg}))
+            doc["degraded"] = bool(deg["phases"] or deg["findings"])
+            return self.validate(doc, prev=prev)
+
+        # a high rejected today in a run whose verification ran in-context,
+        # with the flag silently omitted
+        new_high = rejected(id="F-0003", severity="high", verdict_date="2026-10-27")
+        errs = with_coverage({"phases": ["verification"], "findings": []},
+                             snapshot_doc(rej=[new_high]))
+        self.assertTrue(any("lacks validated_in_context" in e for e in errs))
+        # the id is listed as degraded but the record omits the flag
+        errs = with_coverage({"phases": [], "findings": ["F-0003"]},
+                             snapshot_doc(rej=[new_high]))
+        self.assertTrue(any("degradation.findings but lacks" in e for e in errs))
+        # an older verdict carried into a degraded run is not this run's verdict
+        old = rejected(verdict_date="2026-10-20")
+        self.assertEqual(with_coverage({"phases": ["verification"], "findings": []},
+                                       snapshot_doc(rej=[old])), [])
+        # same-day carry: verbatim from --prev is exempt
+        same_day = rejected(verdict_date="2026-10-27")
+        prev = snapshot_doc(run_id="2026-10-27-1", rej=[same_day])
+        cur = snapshot_doc(run_id="2026-10-27-2", rej=[same_day])
+        self.assertEqual(with_coverage({"phases": ["verification"], "findings": []},
+                                       cur, prev=prev), [])
+        # a fixed record listed as degraded must carry the flag (and then a severity)
+        fx = {"id": "F-0009", "fingerprint": "src/x.js::f::y", "title": "closed",
+              "evidence": [{"file": "src/x.js", "line": 1, "note": "control added"}],
+              "recheck_date": "2026-10-27"}
+        errs = with_coverage({"phases": [], "findings": ["F-0009"]}, snapshot_doc(fixed=[fx]))
+        self.assertTrue(any("degradation.findings but lacks" in e for e in errs))
+
+    def test_fixed_in_context_requires_low_severity(self):
+        base = {"id": "F-0009", "fingerprint": "src/x.js::f::y", "title": "closed",
+                "evidence": [{"file": "src/x.js", "line": 1, "note": "control added"}],
+                "recheck_date": "2026-10-27", "validated_in_context": True}
+        for sev in (None, "high", "critical"):
+            fx = dict(base, severity=sev) if sev else dict(base)
+            errs = self.validate(snapshot_doc(fixed=[fx]))
+            self.assertTrue(any("never closed in-context" in e for e in errs), sev)
+        self.assertEqual(self.validate(snapshot_doc(fixed=[dict(base, severity="low")])), [])
 
     def test_no_coverage_file_skips_degradation_check(self):
         # no sibling coverage.json (recheck snapshots): flag checks are skipped
