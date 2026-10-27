@@ -23,20 +23,27 @@ units). Translate on sight — the graph is the same.
 
 | # | Primitive | What it must do | ZCode dynamic workflows | Claude Code Workflow | If the harness lacks it |
 |---|-----------|-----------------|-------------------------|----------------------|--------------------------|
-| P1 | Typed agent call | Launch a subagent with a prompt; get back one object matching a schema (`references/schemas/*.json`) | `agent(name, sys).ask<T>(prompt)` | Agent step with a structured-output schema | Prompt for "exactly one JSON object, no prose"; parent parses; one repair round, then record degradation (§7) |
-| P2 | Barrier | Wait for all calls of a wave, keep every fulfilled result, note every rejected one | `await Promise.allSettled(jobs)` | gather/join of step results | Run the fan-out sequentially — correct, just slower |
-| P3 | Pipeline | Each element flows through its stages on its own, concurrently with its siblings | one `async () => {…}()` per element, then `allSettled` | per-item step chains | Sequential per-element processing of the same stages |
-| P4 | Loop with exit condition | Repeat waves until no new units / wave limit / budget out | `while` in the script | loop node / recursion | Unrolled fixed number of waves with the same exit checks |
+| P1 | Typed agent call | Launch a subagent with a prompt; get back one object matching a schema (`references/schemas/*.json`) | `agent(name, sys).ask<T>(prompt)` | `agent(prompt, {schema})` — a schema failure returns null → degradation (§7) | Prompt for "exactly one JSON object, no prose"; parent parses; one repair round, then record degradation (§7) |
+| P2 | Barrier | Wait for all calls of a wave, keep every fulfilled result, note every rejected one | `await Promise.allSettled(jobs)` | `parallel()` | Run the fan-out sequentially — correct, just slower |
+| P3 | Pipeline | Each element flows through its stages on its own, concurrently with its siblings | one `async () => {…}()` per element, then `allSettled` | `pipeline()` | Sequential per-element processing of the same stages |
+| P4 | Loop with exit condition | Repeat waves until no new units / wave limit / budget out | `while` in the script | `while` | Unrolled fixed number of waves with the same exit checks |
 | P5 | Deterministic command run | Run a tool (git, `run_store.py`, `validate_findings.py`) and take its output verbatim — never via an LLM | `world.run(cmd, args)` | **Not available to the script**: the main (parent) agent runs `run_store.py` / the validator itself and passes their output into the script `args`; after the script returns, the parent writes the snapshot files and re-runs the validator as the final gate |
-| P6 | Log and phase | Narrate progress; mark stage boundaries | `log(...)`, `phase("…")` | log/output lines | Collect a run log array returned with the result |
+| P6 | Log and phase | Narrate progress; mark stage boundaries | `log(...)`, `phase("…")` | `log()`, `phase()` | Collect a run log array returned with the result |
 | P7 | Board / metrics (optional) | Live units-by-status board, candidates+verdicts table, budget counters | `artifact.board/metrics/table` + `report()` | not available | `log()` lines after every wave and verdict batch (§6) |
-| P8 | Budget counter | Integer incremented on **every** agent call, checked before every fan-out | plain variable in the script | counter in the loop state | Parent tracks it and aborts the workflow when exceeded |
+| P8 | Budget counter | Integer incremented on **every** agent call, checked before every fan-out | plain variable in the script | the `budget` object | Parent tracks it and aborts the workflow when exceeded |
 
 P5 is the load-bearing difference: when the script cannot run processes or
 touch files, the graph stays the same but every deterministic step (repo-id,
 next-run-dir, next-id, trace-changed, snapshot writes, the validator gate)
 moves to the parent agent around the workflow invocation — never into a
-subagent, never skipped.
+subagent, never skipped. More Claude Code Workflow specifics to respect
+when translating: the script cannot read files — prompts carry **paths**
+(skill references, snapshot files) and the agents read them themselves;
+there is no wall-clock access (`Date.now()` is unavailable) — the date and
+run id arrive via `args` and travel back in results; and roughly 16 agents
+run concurrently — slice larger fan-outs (every scout wave, the
+verification pipeline) into batches of ≤16 and treat the batch boundary as
+a barrier.
 
 ## 2. Nodes
 
@@ -61,13 +68,16 @@ response. "Receives" is exhaustive — anything not listed is not sent.
 ### N2 · Recheck verifier (×1 per open finding)
 
 - **Role.** Check each open finding from the latest snapshot against the
-  current code.
+  current code. A `fixed` / `fixed_pending` result for a high/critical
+  finding takes effect only after the second-verifier rule: N8 re-runs the
+  same recheck **blind** — disagreement keeps the finding `still_open` with
+  `disputed: true` and both justifications verbatim.
 - **Receives.** The finding record (id, fingerprint, title, status,
   severity, trace, evidence), the current code, user words attached to the
   request, the recheck dispatch prompt and contract.
 - **Returns.** `references/schemas/recheck-verdict.schema.json`.
 - **Instances.** One per open finding; runs as a pipeline alongside N1 (no
-  barrier between them).
+  barrier between them); +1 blind N8 instance per high/critical closure.
 - **Failure.** Invalid output → one repair round; launch failed twice → the
   finding's verdict falls back to the linear-mode rules for that id alone
   (`still_open`/`cant_tell` with `no_independent_verifier` for high/critical)
@@ -160,17 +170,21 @@ response. "Receives" is exhaustive — anything not listed is not sent.
   closure becomes `still_open`; `disputed` only on an actual disagreement
   (both justifications kept verbatim).
 
-### N9 · Findings collector (×1)
+### N9 · Findings collector (deterministic assembly + repair agent)
 
-- **Role.** Assemble `findings.json` from the verdicts, rechecks, and
-  carried records: apply merges (`merged_from`), derive the summary by
-  counting, keep rejected records verbatim. Never changes a verdict.
-- **Receives.** All verdict objects, recheck results, the carried rejected
+- **Role.** `findings.json` is assembled by **deterministic code** — the
+  script, or the parent agent around it: apply the merge groups
+  (`merged_from`), carry rejected records verbatim, derive the summary by
+  counting. No LLM touches the assembly. An agent is called only as a
+  **repairman** after validator errors (§5), and it fixes record shape and
+  the summary — never a verdict.
+- **Input.** All verdict objects, recheck results, the carried rejected
   records, the merge groups, the fresh ids, the document skeleton
   (`references/data-schema.md`).
-- **Returns.** The complete findings.json document (summary derived, never
+- **Output.** The complete findings.json document (summary derived, never
   authored).
-- **Instances.** 1, after the verification barrier.
+- **Instances.** 1 deterministic assembly (costs no agent call); 0–2 repair
+  agent calls.
 - **Failure.** Failing the validator gate is its failure mode — see §5.
 
 ### N10 · Report reviewer (×1)
@@ -190,8 +204,10 @@ response. "Receives" is exhaustive — anything not listed is not sent.
 ```
 parent prep (P5, no agents): repo-id · latest-run · next-run-dir · git rev-parse
    │
-   ├─ N1 recon A ∥ B ∥ [C]      ┐ pipeline, no mutual barrier
-   ├─ N2 recheck (per finding)  ┘
+   ├─ N1 recon A ∥ B ∥ [C]          ┐ pipelines, no barrier
+   ├─ N2 recheck (per finding)      ┤ between them; N2 fires N8
+   │    └─ N8 blind when it closes  ┘ blind before a high/critical
+   │       a high/critical finding    closure may stick
    ├─ parent: trace-changed per rejected record (P5)
    ▼ barrier
 N3 unit builder ──► units
@@ -211,9 +227,18 @@ N6 consolidator (dedup by root cause — BEFORE verification)
 N7 verifiers (pipeline, cap 20) ──► N8 second verifier where the
    ▼                             rules fire (blind, same bundle)
    ▼ barrier
-N9 collector ─► GATE: validate_findings.py (§5) ─► repair ≤2×
+N9 collector — deterministic assembly (merges, verbatim carry,
+   counted summary); no agent call
    ▼
-parent: write snapshot files + REPORT.md (execution: "workflow")
+parent: write findings.json + coverage.json (execution,
+        degradation, gaps) — BEFORE the first validator run,
+        so the coverage checks sit inside the repair loop
+   ▼
+GATE: validate_findings.py (§5) ─► repair ≤2× (agent fixes
+        records; the parent fixes coverage-side errors)
+   ▼
+parent: write threat-model.md + REPORT.md (execution mode in
+        the header)
    ▼
 N10 reviewer ─► parent applies corrections ─► re-validate ─► issue
 ```
@@ -221,8 +246,9 @@ N10 reviewer ─► parent applies corrections ─► re-validate ─► issue
 Barriers sit where a node needs the **whole** prior stage: unit building
 (all recon), the critic (the whole wave), the consolidator (the whole
 board), the collector (all verdicts). Pipelines sit where elements are
-independent: rechecks, verifiers (+ their second verifiers). The wave loop
-is the only cycle: scouts → critic → new/reassigned units → scouts.
+independent: rechecks (+ N8 on high/critical closures), verifiers (+ their
+second verifiers). The wave loop is the only cycle: scouts → critic →
+new/reassigned units → scouts.
 
 **Exits and honesty.** A run that ends because the wave limit or the budget
 stopped it is **incomplete**: `coverage.json.gaps` lists every unit never
@@ -233,16 +259,20 @@ count. Candidates the verifier cap left out become `needs_review` with
 
 ## 4. Budget
 
-One integer budget `B` of agent calls (default **70**; the user may set it).
-Every P1 call counts — scouts, critics, verifiers, second verifiers,
-repairs, collector, reviewer. Checked **before** every fan-out:
+One integer budget `B` of agent calls. The default is the run estimate —
+the SKILL.md formula (Execution modes) — **× 1.2, rounded up**: headroom
+for repair rounds and second verifiers. The user may override it, and the
+proposal line states the number it proposes. Every P1 call counts —
+scouts, critics, verifiers, second verifiers, repairs, reviewer (the
+deterministic assembly of N9 costs no call). Checked **before** every
+fan-out:
 
 - **Reserves, subtracted up front** (never lent to scouts):
   - validation reserve ≈ 30% of the remainder, minimum 4:
     `max(4, ceil(0.3 × (B − used)))` — verifiers **and** second verifiers
-    draw from it together;
+    (N8 in verification and in recheck alike) draw from it together;
   - critic reserve: 2 (the coming wave's critic + the final critic);
-  - tail reserve: 2 (collector N9 + reviewer N10).
+  - tail reserve: 3 (reviewer N10 + up to 2 N9 repair rounds).
 - **Scout allowance** per wave: `B − used − all reserves`; units beyond it
   are deferred with reason `budget` (logged + coverage gaps), not dropped.
 - **Verifier cap**: at most 20 verifiers per run, and never more than the
@@ -258,14 +288,19 @@ repairs, collector, reviewer. Checked **before** every fan-out:
 The validator is the only gate that matters, and it is identical in every
 mode:
 
-1. After N9 assembles the document, the **parent** (P5 — script or main
-   agent, never a subagent) writes `findings.json` and runs
+1. N9 assembles the document deterministically, and the **parent** (P5 —
+   script or main agent, never a subagent) writes **both** `findings.json`
+   and the sibling `coverage.json` (execution, degradation, gaps)
+   **before** the first validator run — the coverage checks (execution
+   token, degradation accounting, a hidden `validated_in_context`) must
+   sit inside the repair loop, not after it. Then run
    `python3 scripts/validate_findings.py <run>/findings.json --board
    <run>/candidates.jsonl --prev <latest-run-dir>` (omit `--prev` on the
    first run).
-2. Not OK → the validator's error list goes back to N9 as a repair prompt
-   (fix records and summary; verdicts untouched); re-validate. **At most 2
-   repair attempts.**
+2. Not OK → errors on the findings side go to the N9 **repair agent**
+   (fix record shape and the summary; verdicts untouched); errors on the
+   coverage side (execution, degradation lists) the parent fixes itself —
+   coverage.json is its file. Re-validate. **At most 2 repair attempts.**
 3. Still not OK → the snapshot is **not ready**: no OK, no issued report.
    REPORT.md (or the chat answer) says so directly, quoting the remaining
    validator errors, and nothing is claimed as a saved snapshot.
@@ -314,62 +349,64 @@ before launching the run:
 ## 8. Pseudocode
 
 ```
-run audit (BUDGET=70, MAX_WAVES=3):
-  used = 0; incomplete = none
+run audit (BUDGET = ceil(1.2 × estimate), MAX_WAVES=3):
+  used = 0; wave = 0; incomplete = none
   parent: repo-id, latest-run, next-run-dir, source_ref        # P5, no agents
-  open = open findings from latest snapshot
-  rejected = rejected records from latest snapshot
+  open, rejected = open findings + rejected records of latest snapshot
 
   facts  = barrier [ agent(recon A), agent(recon B), agent(recon C)? ]   # P1,P2
-  rechecks = pipeline open as f: agent(recheck(f))            # recheck-verdict schema
+  rechecks = pipeline open as f:                               # N2
+      v = agent(recheck(f))                                    # recheck-verdict schema
+      if v.result closes a high/critical finding:
+          v2 = agent(recheck(f))                               # N8 BLIND before it sticks
+          disagree -> still_open, disputed, both reasons kept
+      return v
   carried = parent: for r in rejected:
                 trace-changed(r)? unchanged&fresh -> keep verbatim
                 else -> recheck pipeline on the same id
 
   units = agent(unit-builder, facts + known + prior gaps)      # N3
-  wave = 0
   while units has status planned and incomplete is none:
     if wave >= MAX_WAVES: incomplete = "max_waves"; break
-    reserve = 2 critics + 2 tail + max(4, ceil(0.3*(BUDGET-used)))       # §4
+    reserve = 2 critics + 3 tail + max(4, ceil(0.3*(BUDGET-used)))       # §4
     if used + reserve >= BUDGET: incomplete = "budget"; break
     wave += 1
     allowance = BUDGET - used - reserve
-    groups = chunk(units.planned, 6)                            # related units together
-    results = barrier [ agent(scout(g)) for g in groups[:allowance] ]    # candidate schema
+    groups = chunk(units.planned, 6)[:allowance]               # the rest deferred "budget" -> gaps
+    results = barrier [ agent(scout(g)) for g in groups ]      # candidate schema
     parent: append valid candidates to candidates.jsonl; invalid -> one retry, then blocked
-    units beyond allowance -> deferred "budget"                 # log + gaps, never dropped
-    critic = agent(critic, coverage + threat model + titles)    # fresh every wave
+    critic = agent(critic, coverage + threat model + titles)   # fresh every wave
     units += critic.missing_units; requeue critic.reassign
     if nothing planned and critic.proposed nothing:
-      final = agent(final-critic, coverage)                     # second opinion
+      final = agent(final-critic, coverage)                    # second opinion
       if final.proposed nothing: coverage_clean = true; break
 
-  merges = agent(consolidator, board candidates)                # N6 barrier, before verification
+  merges = agent(consolidator, board candidates)               # N6 barrier, before verification
   parent: apply merges (merged_from); match latest snapshot;
           next-id --count N for fresh root causes
 
   cap = min(20, validation allowance left)
   queue = root causes by severity_guess desc, confidence, path
-  verdicts = pipeline queue[:cap] as rc:                        # N7, each on its own
-      v = agent(verifier, rc.bundle)                            # verdict schema
+  verdicts = pipeline queue[:cap] as rc:                       # N7, each on its own
+      v = agent(verifier, rc.bundle)                           # verdict schema
       if invalid(v): v = agent(verifier, rc.bundle + errors) once
           else -> needs_review "validator_output_invalid"
       if launch failed twice -> linear rules for rc.id + degradation
       if v.status == rejected and rc.severity_guess in high,critical:
-          v2 = agent(verifier, rc.bundle)                       # N8 BLIND
+          v2 = agent(verifier, rc.bundle)                      # N8 BLIND
           disagree -> stays open, disputed, both reasons kept
       return v
-  queue[cap:] -> needs_review "not_validated"                   # logged, report lists them
+  queue[cap:] -> needs_review "not_validated"                  # logged, report lists them
 
-  doc = agent(collector, verdicts + rechecks + carried + merges + fresh ids)  # N9
-  for attempt in 1..2:                                          # §5 gate
-      parent: write findings.json
+  doc = parent: assemble findings.json (merges, verbatim rejected, counted summary)  # N9
+  parent: write findings.json + coverage.json (execution:"workflow", degradation, gaps)
+          BEFORE the first validator run                       # coverage checks sit in the repair loop
+  for attempt in 1..2:                                         # §5 gate
       if parent-runs validate_findings.py == OK: break
-      doc = agent(collector, doc + validator errors)
-  else: report "snapshot not ready" with errors; stop           # no OK, no report
-  parent: write coverage.json (execution:"workflow", degradation, gaps)
-          and threat-model.md and REPORT.md (header: execution mode, isolation notes)
-  fixes = agent(reviewer, REPORT + findings)                    # N10, downgrade-only
+      doc = agent(repair, doc + validator errors); parent: rewrite findings.json
+  else: report "snapshot not ready" with errors; stop          # no OK, no report
+  parent: write threat-model.md + REPORT.md (header: execution mode)
+  fixes = agent(reviewer, REPORT + findings)                   # N10, downgrade-only
   parent: apply fixes; re-validate; issue report
   return conclusion(complete/incomplete + reason, counts, budget spent)
 ```

@@ -689,8 +689,9 @@ class ValidatorTests(unittest.TestCase):
         errs = with_coverage({"execution": "hybrid", "degradation": empty_deg},
                              snapshot_doc())
         self.assertTrue(any("execution" in e and "hybrid" in e for e in errs))
-        # the three modes are accepted, independent of degradation
-        for mode in ("workflow", "subagents", "linear"):
+        # isolated modes are accepted with empty degradation lists
+        # (linear cannot have them empty — its own test below)
+        for mode in ("workflow", "subagents"):
             self.assertEqual(
                 with_coverage({"execution": mode, "degradation": empty_deg},
                               snapshot_doc()), [], mode)
@@ -702,9 +703,38 @@ class ValidatorTests(unittest.TestCase):
                            "degradation": {"phases": ["verification"],
                                            "findings": ["F-0001"]}}, doc), [])
         # execution alone does not set the degraded flag
-        errs = with_coverage({"execution": "linear", "degradation": empty_deg},
+        errs = with_coverage({"execution": "workflow", "degradation": empty_deg},
                              snapshot_doc())
         self.assertEqual(errs, [])
+
+    def test_linear_run_requires_degraded_phases(self):
+        run = self.base / "runs" / "2026-10-27-1"
+        run.mkdir(parents=True, exist_ok=True)
+
+        def with_coverage(cov, doc):
+            (run / "coverage.json").write_text(json.dumps(cov))
+            return self.validate(doc)
+
+        # linear with an empty phase list hides the degradation
+        doc = snapshot_doc()
+        doc["degraded"] = True
+        errs = with_coverage({"execution": "linear",
+                              "degradation": {"phases": [], "findings": ["F-0001"]}},
+                             doc)
+        self.assertTrue(any("linear but degradation.phases is empty" in e for e in errs))
+        # linear naming its degraded phases is honest
+        doc = snapshot_doc(findings=[finding(validated_in_context=True)])
+        doc["degraded"] = True
+        self.assertEqual(
+            with_coverage({"execution": "linear",
+                           "degradation": {"phases": ["recon", "scouts", "critic",
+                                                      "verification", "reviewer"],
+                                           "findings": ["F-0001"]}}, doc), [])
+        # an isolated subagents run keeps both lists empty
+        self.assertEqual(
+            with_coverage({"execution": "subagents",
+                           "degradation": {"phases": [], "findings": []}},
+                          snapshot_doc()), [])
 
     def test_degraded_rejected_high_never_in_context(self):
         run = self.base / "runs" / "2026-10-27-1"

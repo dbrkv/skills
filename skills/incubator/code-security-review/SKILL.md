@@ -80,7 +80,9 @@ way the run went.
 
 Estimate before choosing: `3 (recon) + 1.3 × open findings (recheck, second
 verifiers included) + units (scouts) + 2 (critics) + 1.3 × min(20,
-candidates) (verifiers, second verifiers included) + 2 (assembly, review)`.
+candidates) (verifiers, second verifiers included) + 3 (tail: review plus
+repair rounds — the findings.json assembly itself is deterministic code,
+not an agent call)`.
 A typical small repository (6–12 units, ≤ 30 code files) lands at 30–45
 calls; a large one (units beyond 12, several subsystems with their own entry
 surfaces, multi-wave coverage ahead) passes 60. Past roughly 45 calls the
@@ -94,8 +96,10 @@ Rules:
 - If the user explicitly asked for a workflow, use the workflow in any mode,
   quick included. If the user explicitly asked for subagents or "without a
   workflow", never propose or use one.
-- "Propose" means exactly one line: the scale estimate (≈ N agent calls) and
-  the reason, then wait for the answer. Without consent, run subagents.
+- "Propose" means exactly one line: the scale estimate (≈ N agent calls),
+  the default workflow budget (⌈1.2 × N⌉ agent calls, rounded up), and the
+  reason — then wait for the answer. Without consent, run subagents. The
+  user may set a different budget; `references/workflow.md` runs on it as B.
 - If the harness has no workflow support, run subagents. If there is no
   agent-launching tool at all, run linearly (rules below).
 - `coverage.json.execution` records how the run went (`workflow` /

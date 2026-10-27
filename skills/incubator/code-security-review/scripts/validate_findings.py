@@ -306,11 +306,11 @@ def validate(data: dict, path: Path, prev: dict = None) -> list:
 
 
 def validate_coverage(coverage_path: Path, data: dict, prev: dict = None) -> list:
-    """Degradation accounting: the run's execution mode is recorded, phases
-    are known tokens, every listed finding id resolves in this snapshot, the
-    findings.json `degraded` flag is true exactly when either degradation
-    list is non-empty, and no in-context verdict hides behind a missing
-    `validated_in_context` flag."""
+    """Degradation accounting: the run's execution mode is recorded (and a
+    linear run must name its degraded phases), phases are known tokens, every
+    listed finding id resolves in this snapshot, the findings.json `degraded`
+    flag is true exactly when either degradation list is non-empty, and no
+    in-context verdict hides behind a missing `validated_in_context` flag."""
     errs = []
     try:
         cov = json.loads(coverage_path.read_text())
@@ -337,6 +337,10 @@ def validate_coverage(coverage_path: Path, data: dict, prev: dict = None) -> lis
         if p not in DEGRADED_PHASES:
             errs.append(f"coverage.json: unknown degradation phase {p!r} "
                         f"(known: {sorted(DEGRADED_PHASES)})")
+    if execution == "linear" and not phases:
+        errs.append("coverage.json: execution is linear but degradation.phases is empty — "
+                    "a linear run has no isolated fan-out, so the degraded phases "
+                    "must be listed")
     recs = []
     for key in ("findings", "rejected", "fixed"):
         v = data.get(key)
