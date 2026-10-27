@@ -203,6 +203,25 @@ class RunStoreTests(unittest.TestCase):
             self.assertIn("-a", str(cm.exception))
             self.assertIn("-b", str(cm.exception))
 
+    def test_next_id_count(self):
+        repo = make_repo(self.base)
+        with store_env(self.home, repo_id="o/r"):
+            self.write_run("o/r", "2026-10-27-1",
+                           snapshot_doc(run_id="2026-10-27-1",
+                                        findings=[finding(id="F-0003")],
+                                        rej=[rejected(id="F-0007")]))
+            import io
+
+            def call(count=None):
+                buf = io.StringIO()
+                with mock.patch("sys.stdout", buf):
+                    run_store.cmd_next_id(repo) if count is None else run_store.cmd_next_id(repo, count)
+                return buf.getvalue().strip()
+
+            self.assertEqual(call(), "F-0008")          # default: one id
+            self.assertEqual(call(1), "F-0008")         # stable within a run
+            self.assertEqual(call(3), "F-0008 F-0009 F-0010")
+
     def test_local_multiple_matches_cli_exit_1(self):
         repo = make_repo(self.base, name="app")
         with store_env(self.home):

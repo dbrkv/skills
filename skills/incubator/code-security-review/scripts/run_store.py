@@ -17,7 +17,7 @@ Subcommands (--repo PATH is accepted before or after the subcommand):
     repo-id            print the repository id (store-root-relative)
     latest-run         JSON: latest snapshot (any kind) + latest full snapshot
     next-run-dir       print the next run directory path (not created)
-    next-id            print the next free F-NNNN across all snapshots
+    next-id [--count N]  the next N free F-NNNN ids (one line; default N=1)
     trace-changed ID   JSON: did the record's trace code change?
 
 Python 3.8+, stdlib only.
@@ -181,7 +181,7 @@ def cmd_next_run_dir(repo: Path) -> None:
     print(runs / f"{today}-{n + 1}")
 
 
-def cmd_next_id(repo: Path) -> None:
+def cmd_next_id(repo: Path, count: int = 1) -> None:
     mx = 0
     for run in snapshot_runs(repo):
         try:
@@ -194,7 +194,7 @@ def cmd_next_id(repo: Path) -> None:
             m = ID_RE.match(str(record.get("id", "")))
             if m:
                 mx = max(mx, int(m.group(1)))
-    print(f"F-{mx + 1:04d}")
+    print(" ".join(f"F-{mx + 1 + i:04d}" for i in range(max(1, count))))
 
 
 def cmd_trace_changed(repo: Path, finding_id: str) -> None:
@@ -254,7 +254,9 @@ def build_parser() -> argparse.ArgumentParser:
     add("repo-id")
     add("latest-run")
     add("next-run-dir")
-    add("next-id")
+    ni = add("next-id")
+    ni.add_argument("--count", type=int, default=1,
+                    help="how many sequential ids to issue (default 1)")
     tc = add("trace-changed")
     tc.add_argument("id", help="finding id, e.g. F-0012")
     return p
@@ -267,7 +269,7 @@ def main(argv=None) -> None:
         "repo-id": lambda: cmd_repo_id(repo),
         "latest-run": lambda: cmd_latest_run(repo),
         "next-run-dir": lambda: cmd_next_run_dir(repo),
-        "next-id": lambda: cmd_next_id(repo),
+        "next-id": lambda: cmd_next_id(repo, args.count),
         "trace-changed": lambda: cmd_trace_changed(repo, args.id),
     }
     try:

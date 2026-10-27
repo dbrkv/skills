@@ -95,7 +95,11 @@ backup encryption — the orchestrator records it as a hardening note in
 `coverage.json` with the R9 fact stated, never as a needs_review finding.
 needs_review is for a real code defect whose exploitability hinges on exactly
 one fact; "the code lacks a control the platform usually supplies" is not a
-defect.
+defect. The routing decision is made **before** verification and is
+exclusive: a deployment-fact candidate goes only to a hardening note (it
+never reaches a verifier); a candidate that was sent to verification and got
+rejected becomes only a rejected record (no note, no duplicate under an
+H-id). One candidate, one bucket.
 
 **Invalid output** (unparseable, prose, contract violation): re-run once with
 a fresh verifier; a second failure → `needs_review` with

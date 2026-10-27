@@ -149,5 +149,13 @@ Before verification, merge the board:
      changed trace or expired verdict → re-verify on the same id. This is the
      second safety net — Phase 1 has already run `trace-changed` over every
      rejected record and carried or re-queued them;
-   - no match → `scripts/run_store.py next-id` issues a fresh number.
-3. Output: the deduped findings list — one entry per root cause — for Phase 5.
+   - no match → issue fresh ids in **one call**:
+     `scripts/run_store.py next-id --count N` with N = the number of new
+     root causes. Numbers derive from saved snapshots only, so calling
+     next-id again mid-run would return the same sequence — allocate once,
+     before verification.
+3. Routing is decided here, before verification, and is exclusive:
+   deployment-fact candidates (the rule in `verification.md`) go only to
+   `coverage.json` hardening notes; everything else goes to Phase 5. A
+   candidate is never both a note and a verified record.
+4. Output: the deduped findings list — one entry per root cause — for Phase 5.

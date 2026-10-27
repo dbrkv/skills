@@ -186,7 +186,9 @@ and the base for spotting a regression if the same fingerprint returns.
 Unit statuses: `covered` (non-empty checks), `candidate` (checks + linked
 findings), `blocked` (reason required). Hardening notes live here — they are
 not findings, carry no severity, and are counted nowhere in the findings
-summary.
+summary. A candidate is either a hardening note or a verified record
+(finding / rejected), never both: the routing decision is made before
+verification (`verification.md`, `scouts.md` Phase 4).
 
 ## threat-model.md and REPORT.md
 
