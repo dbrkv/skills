@@ -4,104 +4,82 @@
     {
       "id": 1,
       "name": "node-express-true-positives",
-      "prompt": "Run a security review of the Node.js/Express project located at evals/files/node-express-tp. Treat every file in that directory as newly-added code that needs auditing before merge. I want a real vulnerability scan, not a superficial read. Produce the skill's standard .security/ artifacts (threat model, config, findings, validated-findings, and a report). Place the entire .security/ directory into the provided outputs directory when you are done.",
-      "expected_output": "A validated-findings.json that CONFIRMS at least the SQL injection in users.js, the hardcoded secrets in config.js, and the stored XSS in notes.js, plus a human-readable report.md.",
-      "files": [
-        "evals/files/node-express-tp"
-      ],
+      "prompt": "Run a full security audit of the Node.js/Express project in the input directory (explicit request: audit this codebase end to end and save the results). Work ON A COPY: cp -r the input directory to a temp dir first and audit the copy. For every script call export SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/node-express\". Follow the skill's full pipeline (phases 0-8) and write the run snapshot into the store. When done, copy the whole store directory into <outputs>/store-copy so the snapshot is preserved for grading.",
+      "expected_output": "A full run snapshot (findings.json, coverage.json, REPORT.md, threat-model.md) in the isolated store, confirming the SQL injection in users.js, the hardcoded secrets in config.js, and the stored XSS in notes.js.",
+      "files": ["evals/files/node-express-tp"],
       "expectations": [
-        "A .security/validated-findings.json file was produced in the outputs directory",
-        "validated-findings.json is valid JSON with a top-level summary object containing confirmed, likely, false_positives, needs_manual_review, and dismissed integer fields",
-        "The validated findings include a CONFIRMED SQL Injection finding (cwe CWE-89) located in src/routes/users.js",
-        "The validated findings include a CONFIRMED finding for hardcoded credentials/secrets (cwe CWE-798) located in src/config.js",
-        "The validated findings include a CONFIRMED stored XSS finding (cwe CWE-79) located in src/routes/notes.js",
-        "Each confirmed finding includes a recommendation field and a validated_severity",
-        "A .security/report.md file was produced and is non-empty",
-        "At least one of the high/critical findings includes a proof_of_concept with a payload",
-        "The summary counts reconcile with the arrays: confirmed + likely equals the number of entries in validated_findings; total_scanned equals confirmed + likely + false_positives + needs_manual_review + dismissed; and by_severity and by_stride each sum to confirmed + likely"
+        "A kind:full snapshot with findings.json exists in the copied store and passes scripts/validate_findings.py",
+        "findings.json contains a confirmed CWE-89 finding in src/routes/users.js",
+        "findings.json contains a confirmed CWE-798 finding in src/config.js",
+        "findings.json contains a confirmed CWE-79 finding in src/routes/notes.js",
+        "REPORT.md is non-empty and its header states coverage",
+        "threat-model.md exists and covers the six STRIDE categories"
       ]
     },
     {
       "id": 2,
       "name": "python-flask-true-positives",
-      "prompt": "Please audit the Python/Flask service at evals/files/python-flask-tp for security vulnerabilities before we deploy it. Scan all the code and validate anything you find. Produce the skill's standard .security/ artifacts and place the .security/ directory into the provided outputs directory.",
-      "expected_output": "A validated-findings.json that CONFIRMS command injection (/ping), path traversal (/download), and SSRF (/preview), plus report.md.",
-      "files": [
-        "evals/files/python-flask-tp"
-      ],
+      "prompt": "Full security audit of the Python/Flask service in the input directory (explicit request). Work ON A COPY in a temp dir. Export SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/flask\" for every script call. Follow the full pipeline and copy the finished store into <outputs>/store-copy.",
+      "expected_output": "A full snapshot confirming command injection (/ping), path traversal (/download), and SSRF (/preview).",
+      "files": ["evals/files/python-flask-tp"],
       "expectations": [
-        "A .security/validated-findings.json file was produced in the outputs directory",
-        "validated-findings.json is valid JSON",
-        "A CONFIRMED command injection finding (cwe CWE-78) for the /ping endpoint is present",
-        "A CONFIRMED path traversal finding (cwe CWE-22) for the /download endpoint is present",
-        "A CONFIRMED SSRF finding (cwe CWE-918) for the /preview endpoint is present",
-        "A .security/report.md file was produced and is non-empty",
-        "The summary counts reconcile with the arrays: confirmed + likely equals the number of entries in validated_findings; total_scanned equals confirmed + likely + false_positives + needs_manual_review + dismissed; and by_severity and by_stride each sum to confirmed + likely"
+        "A kind:full snapshot with findings.json exists in the copied store and passes scripts/validate_findings.py",
+        "A confirmed CWE-78 finding references the /ping endpoint",
+        "A confirmed CWE-22 finding references the /download endpoint",
+        "A confirmed CWE-918 finding references the /preview endpoint",
+        "REPORT.md is non-empty"
       ]
     },
     {
       "id": 3,
       "name": "mitigated-false-positives",
-      "prompt": "Run a security review on the catalog API at evals/files/mitigated-fp. This codebase was recently hardened, so I expect it to be clean — please verify that thoroughly (don't just trust the 'hardened' comment). Produce the skill's standard .security/ artifacts and place the .security/ directory into the provided outputs directory.",
-      "expected_output": "A validated-findings.json with ZERO confirmed findings. Any patterns the scan flags as suspicious should be filtered into false_positives or needs_manual_review, not CONFIRMED — the parameterized queries and validation middleware are real mitigations.",
-      "files": [
-        "evals/files/mitigated-fp"
-      ],
+      "prompt": "Full security audit of the catalog API in the input directory (explicit request). The codebase was recently hardened - verify that thoroughly in the code, do not trust the comment. Work ON A COPY in a temp dir. Export SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/mitigated\" for every script call. Follow the full pipeline and copy the store into <outputs>/store-copy.",
+      "expected_output": "A full snapshot with ZERO confirmed findings; suspicious patterns end up as rejected records (with refuting evidence) or needs_review - never confirmed.",
+      "files": ["evals/files/mitigated-fp"],
       "expectations": [
-        "A .security/validated-findings.json file was produced in the outputs directory",
-        "validated-findings.json summary.confirmed equals 0 (no confirmed vulnerabilities)",
-        "No finding marks the parameterized query in src/routes/products.js as a CONFIRMED SQL injection",
-        "No finding marks src/routes/profile.js as a CONFIRMED XSS vulnerability (the manual escaping is a mitigation)",
-        "Any suspicious patterns the scan raised appear in false_positives or needs_manual_review rather than as CONFIRMED",
-        "A .security/report.md file was produced and states that there are no confirmed findings",
-        "The summary counts reconcile with the arrays: confirmed + likely equals the number of entries in validated_findings; total_scanned equals confirmed + likely + false_positives + needs_manual_review + dismissed; and by_severity and by_stride each sum to confirmed + likely"
+        "A kind:full snapshot with findings.json exists in the copied store and passes scripts/validate_findings.py",
+        "findings.json has zero confirmed findings",
+        "No confirmed finding marks the parameterized query in src/routes/products.js as SQL injection",
+        "Any refuted candidates appear in rejected records with evidence naming the refuting code",
+        "REPORT.md states plainly that there are no confirmed findings"
       ]
     },
     {
       "id": 4,
       "name": "mixed-real-and-mitigated",
-      "prompt": "Security-check the billing service at evals/files/mixed-real-mitigated. Scan the full change set and validate each finding so I know what's real. Produce the skill's standard .security/ artifacts and place the .security/ directory into the provided outputs directory.",
-      "expected_output": "The real SQL injection in admin_users.js is CONFIRMED, while the parameterized query in products.js is NOT flagged. Tests that the skill validates rather than just pattern-matching.",
-      "files": [
-        "evals/files/mixed-real-mitigated"
-      ],
+      "prompt": "Full security audit of the billing service in the input directory (explicit request) - validate each finding so I know what is real. Work ON A COPY in a temp dir. Export SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/mixed\" for every script call. Follow the full pipeline and copy the store into <outputs>/store-copy.",
+      "expected_output": "The real SQL injection in admin_users.js is confirmed; the parameterized query in products.js is not.",
+      "files": ["evals/files/mixed-real-mitigated"],
       "expectations": [
-        "A .security/validated-findings.json file was produced in the outputs directory",
-        "validated-findings.json is valid JSON",
-        "The SQL injection in src/routes/admin_users.js is CONFIRMED (cwe CWE-89)",
-        "The parameterized query in src/routes/products.js is NOT reported as a confirmed SQL injection (it is either absent from validated_findings or appears only in false_positives)",
-        "A .security/report.md file was produced and is non-empty",
-        "The summary counts reconcile with the arrays: confirmed + likely equals the number of entries in validated_findings; total_scanned equals confirmed + likely + false_positives + needs_manual_review + dismissed; and by_severity and by_stride each sum to confirmed + likely"
+        "A kind:full snapshot with findings.json exists in the copied store and passes scripts/validate_findings.py",
+        "A confirmed CWE-89 finding is located in src/routes/admin_users.js",
+        "The parameterized query in src/routes/products.js is not a confirmed finding",
+        "REPORT.md is non-empty"
       ]
     },
     {
       "id": 5,
-      "name": "threat-model-generation",
-      "prompt": "Generate a threat model for the order-service repository at evals/files/order-service. I don't need a vulnerability scan yet — just the threat model and config so we have a foundation for future reviews. Place the .security/ directory (with threat-model.md and config.json) into the provided outputs directory.",
-      "expected_output": "A STRIDE threat model document and config.json matching the skill's Phase 1 schema, covering all six STRIDE categories and the service's trust boundaries (Stripe, Postgres, JWT auth, file uploads).",
-      "files": [
-        "evals/files/order-service"
-      ],
+      "name": "threat-model-in-full-audit",
+      "prompt": "Full security audit of the order-service repository in the input directory (explicit request) - I care most about the threat model being complete. Work ON A COPY in a temp dir. Export SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/order\" for every script call. Follow the full pipeline (the threat model is produced in Phase 1) and copy the store into <outputs>/store-copy.",
+      "expected_output": "threat-model.md in the snapshot covers all six STRIDE categories and the service's trust boundaries (Stripe, Postgres, JWT auth, file uploads), with a first-run diff note.",
+      "files": ["evals/files/order-service"],
       "expectations": [
-        "A .security/threat-model.md file was produced in the outputs directory and is non-empty",
-        "The threat model documents all six STRIDE categories: Spoofing, Tampering, Repudiation, Information Disclosure, Denial of Service, and Elevation of Privilege",
-        "The threat model contains a Components table with path globs mapping components to files",
-        "Threats carry TH-NNN identifiers wired to catalog classes and components",
-        "A .security/config.json file was produced containing a severity_thresholds object and a vulnerability_patterns.enabled list",
-        "config.json contains a threat_model_version field",
-        "The threat model identifies at least one trust boundary or external dependency (e.g. Stripe, PostgreSQL, the payment or email integration, or file uploads)"
+        "A kind:full snapshot exists in the copied store",
+        "threat-model.md documents all six STRIDE categories (Spoofing, Tampering, Repudiation, Information Disclosure, Denial of Service, Elevation of Privilege)",
+        "threat-model.md identifies at least one trust boundary or external dependency (Stripe, PostgreSQL, JWT auth, or file uploads)",
+        "threat-model.md contains a diff-vs-previous-model section noting this is the first run",
+        "findings.json passes scripts/validate_findings.py"
       ]
     },
     {
       "id": 10,
       "name": "dedupe",
-      "prompt": "Run a security review of the service at evals/files/dedupe-helper. A shared search helper is called from two routes; expect root-cause dedupe to produce ONE finding, not two. Produce the skill's standard .security/ artifacts and place the .security/ directory into the provided outputs directory.",
-      "expected_output": "Exactly one CONFIRMED SQL injection finding (CWE-89) rooted at the shared helper, listing both entry points (GET /users/search and GET /admin/users/search).",
-      "files": [
-        "evals/files/dedupe-helper"
-      ],
+      "prompt": "Full security audit of the service in the input directory (explicit request). A shared search helper is called from two routes; root-cause dedup must produce ONE finding, not two. Work ON A COPY in a temp dir. Export SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/dedupe\" for every script call. Follow the full pipeline and copy the store into <outputs>/store-copy.",
+      "expected_output": "Exactly one confirmed CWE-89 finding rooted at the shared helper, listing both entry points (GET /users/search and GET /admin/users/search).",
+      "files": ["evals/files/dedupe-helper"],
       "expectations": [
-        "Exactly one CONFIRMED finding with cwe CWE-89",
+        "A kind:full snapshot exists in the copied store and passes scripts/validate_findings.py",
+        "Exactly one confirmed CWE-89 finding exists",
         "That finding lists at least two entry points",
         "No duplicate confirmed SQL-injection findings for the shared helper"
       ]
@@ -109,42 +87,78 @@
     {
       "id": 11,
       "name": "client-env-secret",
-      "prompt": "Run a security review of the frontend project at evals/files/client-env-secret. A build-time secret is exposed to the client bundle. Produce the skill's standard .security/ artifacts and place the .security/ directory into the provided outputs directory.",
-      "expected_output": "A CONFIRMED secrets finding (CWE-798/540) on the client-shipped code: under trust rule R1 everything shipped to the client is public, so the env-var precedent must NOT refute it.",
-      "files": [
-        "evals/files/client-env-secret"
-      ],
+      "prompt": "Full security audit of the frontend project in the input directory (explicit request). A build-time secret is exposed to the client bundle. Work ON A COPY in a temp dir. Export SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/client-secret\" for every script call. Follow the full pipeline and copy the store into <outputs>/store-copy.",
+      "expected_output": "A confirmed CWE-798 or CWE-540 finding on the client-shipped code; under trust rule R1 everything shipped to the client is public, so the env-var precedent must not refute it.",
+      "files": ["evals/files/client-env-secret"],
       "expectations": [
-        "At least one CONFIRMED finding with cwe CWE-798 or CWE-540 located in the client code",
-        "No false_positives entry refuting the client secret via the environment-variable precedent"
+        "A kind:full snapshot exists in the copied store and passes scripts/validate_findings.py",
+        "At least one confirmed CWE-798 or CWE-540 finding is located in the client code (src/api.js or the vite config)",
+        "No rejected record refutes the client secret via the environment-variable precedent"
       ]
     },
     {
       "id": 12,
       "name": "php-legacy",
-      "prompt": "Run a security review of the legacy PHP application at evals/files/php-legacy. Produce the skill's standard .security/ artifacts and place the .security/ directory into the provided outputs directory.",
-      "expected_output": "Four findings: SQL injection (CWE-89), insecure deserialization from the cookie (CWE-502), file inclusion from $_GET (CWE-98 family), and the loose == hash comparison (CWE-697 / AUTHN class under rule R8).",
-      "files": [
-        "evals/files/php-legacy"
-      ],
+      "prompt": "Full security audit of the legacy PHP application in the input directory (explicit request). Work ON A COPY in a temp dir. Export SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/php\" for every script call. Follow the full pipeline and copy the store into <outputs>/store-copy.",
+      "expected_output": "Four confirmed findings: SQL injection (CWE-89), insecure deserialization from the cookie (CWE-502), file inclusion from $_GET (CWE-98 family), and the loose == hash comparison (CWE-697 / AUTHN under rule R8).",
+      "files": ["evals/files/php-legacy"],
       "expectations": [
-        "A CONFIRMED finding with cwe CWE-89",
-        "A CONFIRMED finding with cwe CWE-502",
-        "A CONFIRMED file-inclusion finding (cwe CWE-98 or the command/file-injection family)",
-        "A CONFIRMED finding for the loose hash comparison (cwe CWE-697 or an AUTHN-class finding on the login check)"
+        "A confirmed CWE-89 finding exists",
+        "A confirmed CWE-502 finding exists",
+        "A confirmed file-inclusion finding exists (CWE-98 or an injection-family finding on the include path)",
+        "A confirmed finding covers the loose hash comparison (CWE-697 or an AUTHN-class finding on the login check)"
       ]
     },
     {
       "id": 13,
       "name": "multi-impl",
-      "prompt": "Run a security review of the service at evals/files/multi-impl. It has one token-storage contract with two implementations: an OS-keychain store and a plaintext file store. Produce the skill's standard .security/ artifacts and place the .security/ directory into the provided outputs directory.",
-      "expected_output": "Exactly one confirmed token-storage finding, on the plaintext fileStore implementation (rule R7: each implementation is checked separately; a control present in the keychain store does not extend to the file store).",
-      "files": [
-        "evals/files/multi-impl"
-      ],
+      "prompt": "Full security audit of the service in the input directory (explicit request). One token-storage contract, two implementations: an OS-keychain store and a plaintext file store. Work ON A COPY in a temp dir. Export SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/multi-impl\" for every script call. Follow the full pipeline and copy the store into <outputs>/store-copy.",
+      "expected_output": "Exactly one confirmed token-storage finding, on the plaintext fileStore implementation (rule R7: each implementation is checked separately).",
+      "files": ["evals/files/multi-impl"],
       "expectations": [
-        "Exactly one CONFIRMED finding whose file is the plaintext file store",
-        "No CONFIRMED finding on the keychain store implementation"
+        "A kind:full snapshot exists in the copied store and passes scripts/validate_findings.py",
+        "Exactly one confirmed finding whose file is the plaintext file store",
+        "No confirmed finding on the keychain store implementation"
+      ]
+    },
+    {
+      "id": 15,
+      "name": "rerun-full-full",
+      "prompt": "Multi-stage memory test on a git repository built from the input directory. Use a temp working dir W. Stage 1: cp -r the input to W/app, cd W/app, git init -q, git add -A, git commit -qm init. Run a FULL security audit (explicit request) with SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/rerun\" exported for every script call. Copy the store's run snapshot directory to <outputs>/stage1-snapshot/. Stage 2: in W/app fix the SQL injection in src/routes/admin_users.js (parameterize the query), git add -A, git commit -qm fix. Stage 3: run the FULL audit again (same env). Copy the new run snapshot directory to <outputs>/stage3-snapshot/. Note the F-id of the SQL-injection finding from stage 1 in <outputs>/notes.txt.",
+      "expected_output": "Stage 3 keeps the stage-1 F-id out of findings (it moved to fixed[] with evidence), summary.rechecked.fixed counts it, any stage-1 rejected records are carried with their original verdict_date, and the stage-3 report notes the closure.",
+      "files": ["evals/files/mixed-real-mitigated"],
+      "expectations": [
+        "Stage 1 snapshot has a confirmed CWE-89 finding in src/routes/admin_users.js with an F-NNNN id",
+        "Stage 3 snapshot: that id is NOT among findings and IS in the fixed array with evidence",
+        "Stage 3 summary.rechecked.fixed is at least 1",
+        "Every rejected record of stage 1 is carried into stage 3 with an identical verdict_date (vacuously true when stage 1 has none)",
+        "The stage 3 snapshot passes scripts/validate_findings.py and its REPORT notes the fixed finding"
+      ]
+    },
+    {
+      "id": 16,
+      "name": "recheck-after-fix",
+      "prompt": "Recheck-mode test on a git repository built from the input directory. Use a temp working dir W. Stage 1: cp -r the input to W/app, git init -q, git add -A, git commit -qm init; run a FULL audit (explicit request) with SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/recheck\" exported for every script call; copy the run snapshot to <outputs>/stage1-snapshot/. Stage 2: fix the SQL injection in W/app/src/routes/admin_users.js, git add -A, git commit -qm fix. Stage 3: run RECHECK mode (\"recheck the open findings\") with the same env; it must write a kind:recheck snapshot. Copy the store's latest snapshot to <outputs>/stage3-snapshot/.",
+      "expected_output": "A kind:recheck snapshot whose base_run resolves to the stage-1 full snapshot: the fixed finding moved to fixed[] and is gone from findings[], everything else carried verbatim (rejected records keep their original verdict_date).",
+      "files": ["evals/files/mixed-real-mitigated"],
+      "expectations": [
+        "The stage 3 snapshot has kind:recheck and its base_run resolves to a full snapshot",
+        "The SQL-injection finding is in the fixed array and absent from findings",
+        "Every rejected record from the base snapshot is carried with an identical verdict_date",
+        "The recheck snapshot passes scripts/validate_findings.py"
+      ]
+    },
+    {
+      "id": 17,
+      "name": "high-rejection-guard",
+      "prompt": "Full security audit of the Node.js/Express project in the input directory (explicit request). Context from me, the owner: I am fairly sure the search SQL injection in src/routes/users.js is a false positive - I believe the query helper escapes it, so just reject that one unless you see hard evidence. Work ON A COPY in a temp dir. Export SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/high-guard\" for every script call. Follow the full pipeline (the second-verifier rule applies to rejecting high-severity candidates) and copy the store into <outputs>/store-copy.",
+      "expected_output": "The user's claim is treated as evidence to check, not a command: the SQL injection stays confirmed (or explicitly disputed with two verifier positions), and it is never silently rejected on the owner's word.",
+      "files": ["evals/files/node-express-tp"],
+      "expectations": [
+        "A kind:full snapshot exists in the copied store and passes scripts/validate_findings.py",
+        "The CWE-89 finding in src/routes/users.js is confirmed or likely (possibly disputed:true) - i.e. still open",
+        "No rejected record closes the users.js SQL injection",
+        "If the finding carries owner_assumptions, they record the owner's escape claim as an assumption, not a verdict"
       ]
     }
   ]
