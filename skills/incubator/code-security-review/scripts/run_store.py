@@ -3,20 +3,24 @@
 
 Storage layout (see references/data-schema.md):
 
-    $SECURITY_AUDIT_HOME (default ~/.security-audit)/<repo-id>/runs/<UTC-date>-<n>/
+    $SECURITY_AUDIT_HOME (default ~/security-audit)/<repo-id>/runs/<UTC-date>-<n>/
+
+repo-id forms: the normalized origin URL (github.com/owner/repo), or — for a
+repository without a remote — `local/<hash8>-<basename>` where hash8 is the
+first 8 hex of sha256 of the root commit and basename is the normalized repo
+folder name (a readable signature, set at creation). Local ids resolve BY
+HASH (glob `local/<hash8>-*`), so renaming the repo folder keeps its history;
+several matches are an error. A non-git directory hashes its path.
+The old ~/.security-audit path is not read (no auto-migration).
 
 Subcommands (--repo PATH is accepted before or after the subcommand):
 
-    repo-id            print the repository id
+    repo-id            print the repository id (store-root-relative)
     latest-run         JSON: latest snapshot (any kind) + latest full snapshot
     next-run-dir       print the next run directory path (not created)
     next-id            print the next free F-NNNN across all snapshots
     trace-changed ID   JSON: did the record's trace code change?
 
-repo-id resolution: $SECURITY_AUDIT_REPO_ID wins; then the normalized origin
-URL (owner/repo lowercased on github.com, gitlab.com, bitbucket.org); without
-a remote, local-<sha256 of the root commit, first 12 hex>; a non-git
-directory falls back to a path hash (prefer the env override).
 Python 3.8+, stdlib only.
 """
 
@@ -37,10 +41,15 @@ CASE_INSENSITIVE_HOSTS = {"github.com", "gitlab.com", "bitbucket.org"}
 ID_RE = re.compile(r"^F-(\d+)$")
 RUN_NAME_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})-(\d+)$")
 HEX_REF_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
+NAME_BAD_RE = re.compile(r"[^A-Za-z0-9._-]")
+
+
+class RepoIdError(Exception):
+    """The local store directory cannot be resolved unambiguously."""
 
 
 def store_root() -> Path:
-    return Path(os.environ.get("SECURITY_AUDIT_HOME", str(Path.home() / ".security-audit"))).expanduser()
+    return Path(os.environ.get("SECURITY_AUDIT_HOME", str(Path.home() / "security-audit"))).expanduser()
 
 
 def git(repo: Path, *args: str) -> subprocess.CompletedProcess:
@@ -68,7 +77,20 @@ def normalize_origin(url: str) -> str:
     return f"{host}/{path}"
 
 
+def safe_basename(name: str) -> str:
+    cleaned = NAME_BAD_RE.sub("-", name).strip("-")
+    return cleaned or "repo"
+
+
+def local_dir(hash_source: str, repo: Path) -> str:
+    """Canonical local id: local/<hash8>-<basename> (basename is a readable
+    signature set at creation; resolution is by hash, never by name)."""
+    hash8 = hashlib.sha256(hash_source.encode()).hexdigest()[:8]
+    return f"local/{hash8}-{safe_basename(repo.resolve().name)}"
+
+
 def repo_id(repo: Path) -> str:
+    """Canonical (creation-time) id, store-root-relative."""
     override = os.environ.get("SECURITY_AUDIT_REPO_ID")
     if override:
         return override
@@ -78,12 +100,32 @@ def repo_id(repo: Path) -> str:
     r = git(repo, "rev-list", "--max-parents=0", "HEAD")
     if r.returncode == 0:
         root = r.stdout.strip().splitlines()[0]
-        return "local-" + hashlib.sha256(root.encode()).hexdigest()[:12]
-    return "local-" + hashlib.sha256(str(repo.resolve()).encode()).hexdigest()[:12]
+        return local_dir(root, repo)
+    return local_dir(str(repo.resolve()), repo)
+
+
+def resolve_repo_id(repo: Path) -> str:
+    """The id of the store directory to use. Local ids resolve by hash: an
+    existing `local/<hash8>-*` wins regardless of its basename, so renaming
+    the repo folder keeps its history. Several matches are an error."""
+    rid = repo_id(repo)
+    if not rid.startswith("local/"):
+        return rid
+    hash8 = rid.split("/")[1].split("-", 1)[0]
+    local_root = store_root() / "local"
+    if local_root.is_dir():
+        matches = sorted(d.name for d in local_root.iterdir()
+                         if d.is_dir() and d.name.startswith(hash8 + "-"))
+        if len(matches) == 1:
+            return f"local/{matches[0]}"
+        if len(matches) > 1:
+            raise RepoIdError(
+                f"multiple local store directories match hash {hash8}: " + ", ".join(matches))
+    return rid
 
 
 def runs_dir(repo: Path) -> Path:
-    return store_root() / repo_id(repo) / "runs"
+    return store_root() / resolve_repo_id(repo) / "runs"
 
 
 def run_sort_key(d: Path):
@@ -111,7 +153,7 @@ def snapshot_runs(repo: Path) -> list:
 
 
 def cmd_repo_id(repo: Path) -> None:
-    print(repo_id(repo))
+    print(resolve_repo_id(repo))
 
 
 def cmd_latest_run(repo: Path) -> None:
@@ -229,7 +271,11 @@ def main(argv=None) -> None:
         "next-id": lambda: cmd_next_id(repo),
         "trace-changed": lambda: cmd_trace_changed(repo, args.id),
     }
-    cmds[args.cmd]()
+    try:
+        cmds[args.cmd]()
+    except RepoIdError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

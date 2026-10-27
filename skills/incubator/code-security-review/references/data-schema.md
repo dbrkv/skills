@@ -6,16 +6,22 @@ implements the storage rules.
 
 ## Storage root and identity
 
-- Root: `~/.security-audit/`, overridable with the `SECURITY_AUDIT_HOME`
+- Root: `~/security-audit/`, overridable with the `SECURITY_AUDIT_HOME`
   environment variable (every script honors it; evals use it to isolate
   their runs from the real store). `SECURITY_AUDIT_REPO_ID` overrides the
   computed repo-id outright (used when the target is a plain directory
-  inside another git repository).
+  inside another git repository). The old `~/.security-audit` path is not
+  read (no auto-migration).
 - `<repo-id>`: the normalized `origin` URL — strip the scheme, credentials,
   and `.git`; lowercase the host; lowercase the path on github.com,
   gitlab.com, and bitbucket.org (case-insensitive hosts). Without a remote:
-  `local-<first 12 hex of sha256 of the root commit>`, where the root commit
-  is `git rev-list --max-parents=0 HEAD`.
+  `local/<hash8>-<name>` — the first 8 hex of sha256 of the root commit
+  (`git rev-list --max-parents=0 HEAD`) plus the normalized repo folder name
+  (`[A-Za-z0-9._-]`, anything else becomes `-`). The name is a readable
+  signature set at creation: local ids resolve BY HASH (glob
+  `local/<hash8>-*`), so renaming the repo folder keeps its history, and
+  several hash matches are an error listing the directories. A non-git
+  directory uses the same form with the hash of its path.
 - Runs: `runs/<YYYY-MM-DD>-<n>/`, `<n>` starting at 1 per date; the date is
   UTC (the same clock as `findings.date`, so run id and date never diverge).
   Snapshots are immutable — a run never edits or deletes an earlier run.

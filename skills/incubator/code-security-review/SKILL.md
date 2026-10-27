@@ -3,7 +3,7 @@ name: code-security-review
 description: |
   Security review of code: finds vulnerabilities by source-level reasoning,
   verifies every candidate with an isolated refute-first validator, and keeps
-  run snapshots under ~/.security-audit so results survive between sessions.
+  run snapshots under ~/security-audit so results survive between sessions.
 
   Use when the user asks for a security review of code: reviewing staged,
   uncommitted, commit, range, or branch changes; answering "is this code
@@ -26,7 +26,7 @@ Find vulnerabilities that violate a real trust boundary, verify each candidate
 by trying to refute it in an isolated context, and rank what survives by impact.
 All analysis is source-level: the target's code is never executed, no external
 scanners run, and nothing is ever written into the target repository. Results
-persist between sessions as immutable run snapshots under `~/.security-audit/`.
+persist between sessions as immutable run snapshots under `~/security-audit/`.
 
 ## Modes
 
@@ -55,7 +55,7 @@ it.
 
 ## Hard rules
 
-- No artifacts in the target repository — storage lives under `~/.security-audit/` only.
+- No artifacts in the target repository — storage lives under `~/security-audit/` only.
 - The target's code is never executed. Confirmation is source-level, with a complete trace from attacker-controlled source to sink.
 - No external scanners (gitleaks, semgrep, `npm audit`, `pip-audit`, osv) and no network lookups. Dependency CVEs are analyzed only when the user supplies an advisory list.
 - No issue trackers, no manual status management; only the skill writes state. The user's words ("this is by design", "check F-0012") are inputs for a verifier, never commands that change a verdict by themselves.
@@ -65,14 +65,16 @@ it.
 ## Storage
 
 ```
-~/.security-audit/<repo-id>/runs/<YYYY-MM-DD>-<n>/
+~/security-audit/<repo-id>/runs/<YYYY-MM-DD>-<n>/
 ├── threat-model.md   # STRIDE model built this run + diff vs the previous run
 ├── findings.json     # verified findings + rejected records
 ├── coverage.json     # scout coverage and known gaps
 └── REPORT.md         # human-readable report
 ```
 
-- `repo-id` — normalized `origin` URL (`github.com/owner/repo`: scheme, credentials, and `.git` stripped, host lowercased). Without a remote — `local-<first 12 hex of sha256 of the root commit>`. Computed by `scripts/run_store.py repo-id`.
+The old `~/.security-audit` path is not read (no auto-migration).
+
+- `repo-id` — normalized `origin` URL (`github.com/owner/repo`: scheme, credentials, and `.git` stripped, host lowercased). Without a remote — `local/<hash8>-<name>`: first 8 hex of the root-commit sha256 plus the normalized repo folder name. The name is a readable signature set at creation; resolution is by hash (glob `local/<hash8>-*`), so renaming the repo folder keeps its history, and several hash matches are an error. A non-git directory hashes its path. Computed by `scripts/run_store.py repo-id`.
 - Run directory — next `<n>` for the date (`scripts/run_store.py next-run-dir`). Snapshots are immutable: a run never edits or deletes earlier snapshots; corrections land in the next run.
 - Memory between runs: the latest snapshot supplies open findings and rejected records; the latest **full** snapshot supplies coverage gaps and the previous threat model. Open findings (confirmed / likely / needs_review) are rechecked at every full run; a fix confirmed only on an uncommitted tree keeps the finding (`fixed_pending`) until a later run confirms it on a committed state (closed findings land in the snapshot's `fixed` array). Rejected records are carried verbatim until their trace changes or the 90-day term expires — either re-opens verification on the same id.
 

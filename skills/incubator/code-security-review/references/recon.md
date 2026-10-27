@@ -12,8 +12,8 @@ applies; everything here describes full mode unless said otherwise.
 2. **Source state.** `source_ref = git rev-parse HEAD`; `dirty` = the working
    tree is not clean. A dirty tree is recorded, never refused.
 3. **repo-id.** `python3 scripts/run_store.py repo-id` — the normalized
-   `origin` URL; without a remote, `local-<first 12 hex of sha256 of the root
-   commit>`.
+   `origin` URL; without a remote, `local/<hash8>-<name>` (root-commit hash
+   + folder name), resolved by hash so a renamed folder keeps its history.
 4. **Snapshots.** `python3 scripts/run_store.py latest-run` prints two paths
    as JSON: the latest snapshot of any kind (the current findings state) and
    the latest `full` snapshot (the coverage and threat-model state — recheck
@@ -26,7 +26,7 @@ applies; everything here describes full mode unless said otherwise.
 5. **Plan.** Print 2–5 lines: scope, repo-id, snapshot used (or "first run"),
    planned phases. Phase 0 writes nothing to disk.
 
-The storage root is `~/.security-audit/` unless `SECURITY_AUDIT_HOME` is set
+The storage root is `~/security-audit/` unless `SECURITY_AUDIT_HOME` is set
 (see `data-schema.md`); every script honors it.
 
 ## Phase 1 — Recon

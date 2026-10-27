@@ -171,9 +171,62 @@ class RunStoreTests(unittest.TestCase):
         repo = make_repo(self.base)
         root = subprocess.run(["git", "-C", str(repo), "rev-list", "--max-parents=0", "HEAD"],
                               capture_output=True, text=True).stdout.strip().splitlines()[0]
-        want = "local-" + hashlib.sha256(root.encode()).hexdigest()[:12]
+        want = "local/" + hashlib.sha256(root.encode()).hexdigest()[:8] + "-repo"
         with store_env(self.home):
             self.assertEqual(run_store.repo_id(repo), want)
+
+    def test_local_rename_preserves_history(self):
+        repo = make_repo(self.base, name="app")
+        with store_env(self.home):
+            runs = run_store.runs_dir(repo)          # resolves canonical local/<hash8>-app
+            runs.mkdir(parents=True)
+            first = runs / "2026-10-27-1"
+            first.mkdir()
+            (first / "findings.json").write_text(json.dumps(snapshot_doc()))
+            renamed = self.base / "app-renamed"
+            repo.rename(renamed)
+            # resolution is by hash: the old basename's directory wins
+            rid = run_store.resolve_repo_id(renamed)
+            self.assertTrue(rid.endswith("-app"), rid)
+            self.assertEqual(run_store.runs_dir(renamed), runs)
+            self.assertEqual(run_store.snapshot_runs(renamed), [first])
+
+    def test_local_multiple_hash_matches_error(self):
+        repo = make_repo(self.base, name="app")
+        with store_env(self.home):
+            hash8 = run_store.repo_id(repo).split("/")[1].split("-", 1)[0]
+            local_root = self.home / "local"
+            (local_root / f"{hash8}-a").mkdir(parents=True)
+            (local_root / f"{hash8}-b").mkdir(parents=True)
+            with self.assertRaises(run_store.RepoIdError) as cm:
+                run_store.resolve_repo_id(repo)
+            self.assertIn("-a", str(cm.exception))
+            self.assertIn("-b", str(cm.exception))
+
+    def test_local_multiple_matches_cli_exit_1(self):
+        repo = make_repo(self.base, name="app")
+        with store_env(self.home):
+            hash8 = run_store.repo_id(repo).split("/")[1].split("-", 1)[0]
+            local_root = self.home / "local"
+            (local_root / f"{hash8}-a").mkdir(parents=True)
+            (local_root / f"{hash8}-b").mkdir(parents=True)
+            r = subprocess.run([PYTHON, str(Path(run_store.__file__)),
+                                "--repo", str(repo), "repo-id"],
+                               capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("multiple local store directories", r.stderr)
+
+    def test_non_git_dir_local_form(self):
+        d = self.base / "plain-proj"
+        d.mkdir()
+        with store_env(self.home):
+            want = "local/" + hashlib.sha256(str(d.resolve()).encode()).hexdigest()[:8] + "-plain-proj"
+            self.assertEqual(run_store.repo_id(d), want)
+
+    def test_safe_basename_normalization(self):
+        self.assertEqual(run_store.safe_basename("my repo!"), "my-repo")
+        self.assertEqual(run_store.safe_basename("::weird::"), "-weird-".strip("-"))
+        self.assertEqual(run_store.safe_basename("---"), "repo")
 
     def test_repo_id_env_override(self):
         repo = make_repo(self.base)
