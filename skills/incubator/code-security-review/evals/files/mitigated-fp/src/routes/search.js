@@ -4,7 +4,7 @@ const { validate } = require('../middleware/validate');
 const router = express.Router();
 
 const searchSchema = {
-  q: { type: 'string', max: 80, pattern: /^[\w\s.-]+$/ },
+  q: { type: 'string', required: true, max: 80, pattern: /^[\w\s.-]+$/ },
 };
 
 // GET /search?q=<term>

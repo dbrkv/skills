@@ -4,6 +4,7 @@ const Joi = require('joi');
 //   type: 'string' | 'number' | 'boolean'
 //   max:  max length (strings) or value (numbers)
 //   pattern: regex the string must match
+//   required: key must be present
 // On failure, sends a 400 response through `res` and returns {} so the caller
 // can bail out. On success returns the coerced values.
 function validate(input, schema, res) {
@@ -20,6 +21,7 @@ function validate(input, schema, res) {
       if (rule.max) s = s.max(rule.max);
       if (rule.pattern) s = s.pattern(rule.pattern);
     }
+    if (rule.required) s = s.required();
     joiMap[key] = s;
   }
 
