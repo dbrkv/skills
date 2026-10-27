@@ -104,7 +104,7 @@
       "files": ["evals/files/php-legacy"],
       "expectations": [
         "A confirmed CWE-89 finding exists",
-        "A confirmed CWE-502 finding exists",
+        "A CWE-502 finding exists with status confirmed OR likely, and its reason/missing_fact names the unverifiable condition (the POP gadget chain) - the fixture has no classes with magic methods, so likely is the correct verdict"
         "A confirmed file-inclusion finding exists (CWE-98 or an injection-family finding on the include path)",
         "A confirmed finding covers the loose hash comparison (CWE-697 or an AUTHN-class finding on the login check)"
       ]
