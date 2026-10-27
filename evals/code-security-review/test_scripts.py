@@ -64,6 +64,11 @@ def head(repo: Path) -> str:
                           capture_output=True, text=True).stdout.strip()
 
 
+# A needs_review record no verifier produced: no verdict fields at all.
+UNVERIFIED = {"confidence": None, "reachability": None, "exploitability": None,
+              "existing_mitigations": [], "exploitation_path": []}
+
+
 def finding(**over) -> dict:
     base = {
         "id": "F-0001",
@@ -546,7 +551,8 @@ class ValidatorTests(unittest.TestCase):
         errs = self.validate(snapshot_doc(findings=[bad2]))
         self.assertTrue(any("missing_fact must be non-empty exactly when" in e for e in errs))
         ok = finding(id="F-0011", status="needs_review", severity=None,
-                     reason_code="not_validated", missing_fact=None)
+                     reason_code="not_validated", missing_fact=None,
+                     **UNVERIFIED)
         self.assertEqual(self.validate(snapshot_doc(findings=[ok])), [])
         linear = finding(id="F-0012", status="needs_review", severity=None,
                          reason_code="no_independent_verifier", missing_fact=None)
@@ -556,6 +562,33 @@ class ValidatorTests(unittest.TestCase):
                               missing_fact="should be null")
         errs = self.validate(snapshot_doc(findings=[linear_fact]))
         self.assertTrue(any("missing_fact must be non-empty exactly when" in e for e in errs))
+
+    def test_unverified_needs_review_has_no_verdict_fields(self):
+        # not_validated / validator_output_invalid: no verifier, so no defaults
+        for code in ("not_validated", "validator_output_invalid"):
+            stub = finding(id="F-0014", status="needs_review", severity=None,
+                           reason_code=code, missing_fact=None,
+                           **dict(UNVERIFIED, reachability="external"))
+            errs = self.validate(snapshot_doc(findings=[stub]))
+            self.assertTrue(any("reachability" in e and "no defaults" in e for e in errs), errs)
+        # a verifier's own needs_review keeps the fields it produced
+        verified = finding(id="F-0015", status="needs_review", severity=None,
+                           reason_code="missing_fact", missing_fact="is /admin behind the VPN?")
+        self.assertEqual(self.validate(snapshot_doc(findings=[verified])), [])
+
+    def test_disputed_never_confirmed_by_verification(self):
+        two = ["refuted: escaped upstream", "real: raw query at line 45"]
+        bad = finding(id="F-0016", disputed=True, verifier_reasons=two)
+        errs = self.validate(snapshot_doc(findings=[bad]))
+        self.assertTrue(any("never confirmed" in e for e in errs), errs)
+        ok = finding(id="F-0017", status="likely", disputed=True, verifier_reasons=two)
+        self.assertEqual(self.validate(snapshot_doc(findings=[ok])), [])
+        # a recheck dispute (closure not accepted) may stay confirmed
+        recheck = finding(id="F-0018", disputed=True, verifier_reasons=two,
+                          last_recheck={"run_id": "2026-10-27-1", "date": "2026-10-27",
+                                        "result": "still_open"})
+        doc = snapshot_doc(findings=[recheck])
+        self.assertFalse(any("never confirmed" in e for e in self.validate(doc)))
 
     def test_validated_in_context_rules(self):
         # findings may carry the flag freely (confirmed high in-context is allowed)
@@ -666,6 +699,36 @@ class ValidatorTests(unittest.TestCase):
             errs = self.validate(snapshot_doc(fixed=[fx]))
             self.assertTrue(any("never closed in-context" in e for e in errs), sev)
         self.assertEqual(self.validate(snapshot_doc(fixed=[dict(base, severity="low")])), [])
+
+    def test_degraded_reason_codes_listed_in_degradation(self):
+        run = self.base / "runs" / "2026-10-27-1"
+        run.mkdir(parents=True, exist_ok=True)
+
+        def with_coverage(deg, doc):
+            (run / "coverage.json").write_text(
+                json.dumps({"execution": "workflow", "degradation": deg}))
+            doc["degraded"] = bool(deg["phases"] or deg["findings"])
+            return self.validate(doc)
+
+        n8 = finding(id="F-0020", status="needs_review", severity=None,
+                     reason_code="no_independent_verifier", missing_fact=None)
+        errs = with_coverage({"phases": [], "findings": []}, snapshot_doc(findings=[n8]))
+        self.assertTrue(any("F-0020" in e and "degradation.findings" in e for e in errs), errs)
+        self.assertEqual(with_coverage({"phases": [], "findings": ["F-0020"]},
+                                       snapshot_doc(findings=[n8])), [])
+        self.assertEqual(with_coverage({"phases": ["verification"], "findings": []},
+                                       snapshot_doc(findings=[n8])), [])
+        # a verdict from an earlier run is not this run's degradation
+        old = finding(id="F-0021", status="needs_review", severity=None,
+                      reason_code="no_independent_verifier", missing_fact=None,
+                      verdict_date="2026-10-01")
+        self.assertEqual(with_coverage({"phases": [], "findings": []},
+                                       snapshot_doc(findings=[old])), [])
+        # the verifier cap is a budget cut, not degradation
+        capped = finding(id="F-0022", status="needs_review", severity=None,
+                         reason_code="not_validated", missing_fact=None, **UNVERIFIED)
+        self.assertEqual(with_coverage({"phases": [], "findings": []},
+                                       snapshot_doc(findings=[capped])), [])
 
     def test_no_coverage_file_skips_degradation_check(self):
         # no sibling coverage.json (recheck snapshots): flag checks are skipped
@@ -812,7 +875,7 @@ class ValidatorTests(unittest.TestCase):
 
 
 class SchemaTests(unittest.TestCase):
-    """references/schemas: every file is a valid JSON Schema, the four
+    """references/schemas: every file is a valid JSON Schema, the five
     expected schemas exist, and validate_findings.py leans on them."""
 
     def setUp(self):
@@ -964,6 +1027,49 @@ class BoardAccountingTests(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("candidate.schema.json", r.stdout)
         self.assertIn("severity_guess", r.stdout)
+
+
+    def run_board(self, doc, lines, coverage=None):
+        board = self.write_board(lines)
+        run = self.base / "runs" / "2026-10-27-1"
+        run.mkdir(parents=True, exist_ok=True)
+        path = run / "findings.json"
+        path.write_text(json.dumps(doc))
+        if coverage is not None:
+            (run / "coverage.json").write_text(json.dumps(
+                dict({"execution": "workflow",
+                      "degradation": {"phases": [], "findings": []}}, **coverage)))
+        return subprocess.run([PYTHON, str(Path(validate_findings.__file__)),
+                               str(path), "--board", str(board)], capture_output=True, text=True)
+
+    def test_board_duplicate_ids_fail(self):
+        doc = snapshot_doc(findings=[finding(merged_from=["u1-c1"])])
+        r = self.run_board(doc, [board_candidate(id="u1-c1"),
+                                 board_candidate(id="u1-c1", title="another defect")])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("more than one line", r.stdout)
+
+    def test_board_hardening_note_is_a_bucket(self):
+        doc = snapshot_doc(findings=[finding(merged_from=["u1-c1"])])
+        note = {"id": "H-001", "file": "src/server.js", "where": "listen()",
+                "note": "R9: TLS at the proxy", "recommendation": "confirm TLS",
+                "candidates": ["u1-c2"]}
+        lines = [board_candidate(id="u1-c1"),
+                 board_candidate(id="u1-c2", severity_guess="medium")]
+        r = self.run_board(doc, lines, {"hardening_notes": [note]})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        # high/critical is never routed past the verifier
+        lines[1] = board_candidate(id="u1-c2", severity_guess="high")
+        r = self.run_board(doc, lines, {"hardening_notes": [note]})
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("never routed", r.stdout)
+
+    def test_board_one_candidate_one_bucket(self):
+        doc = snapshot_doc(findings=[finding(merged_from=["u1-c1"])],
+                           rej=[rejected(merged_from=["u1-c1"])])
+        r = self.run_board(doc, [board_candidate(id="u1-c1")])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("one candidate, one bucket", r.stdout)
 
 
 class PrevCarryTests(unittest.TestCase):

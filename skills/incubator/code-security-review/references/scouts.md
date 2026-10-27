@@ -61,11 +61,16 @@ receives, and only:
 A scout does not receive: other scouts' outputs, any verdict, or the hard
 exclusions — inclusion bias is the scout's job, filtering is the verifier's.
 
-**Scout response contract** (JSON only, no prose): one object with `unit`
-(the unit id), `checks[]` — `{paths, invariant, result}` per check, the
-coverage evidence — `candidates[]`, `uncovered[]` — `{surface, boundary,
-paths, reason}` entries that become candidate units for the critic — and
-`hardening_notes[]`. Each element of `candidates[]` carries the candidate
+**Scout response contract** (JSON only, no prose):
+`references/schemas/scout-result.schema.json` — `results[]` with one
+element per assigned unit (a scout with one unit returns one element), each
+holding `unit` (the unit id), `checks[]` — `{paths, invariant, result}` per
+check, the coverage evidence **for that unit only** — `candidates[]`,
+`uncovered[]` — `{surface, boundary, paths, reason}` entries that become
+candidate units for the critic — and `hardening_notes[]`. Checks are never
+pooled across units: a unit counts as covered only by checks recorded on it,
+and a unit missing from `results` was not scouted (it stays planned). Each
+element of `candidates[]` carries the candidate
 fields exactly as `references/schemas/candidate.schema.json` defines them
 (read the schema file and follow it; the schema is the contract, it is not
 restated here). The scout fills in its `unit` on every candidate; the
@@ -132,6 +137,10 @@ Before verification, merge the board:
      before verification.
 3. Routing is decided here, before verification, and is exclusive:
    deployment-fact candidates (the rule in `verification.md`) go only to
-   `coverage.json` hardening notes; everything else goes to Phase 5. A
-   candidate is never both a note and a verified record.
+   `coverage.json` hardening notes, which list their board ids in
+   `candidates[]`; everything else goes to Phase 5. A candidate is never
+   both a note and a verified record. Routing skips verification, so it
+   applies only to candidates whose `severity_guess` is medium or low; a
+   high/critical candidate always goes to a verifier, which may still
+   refute it on the deployment fact — under the second-verifier rule.
 4. Output: the deduped findings list — one entry per root cause — for Phase 5.

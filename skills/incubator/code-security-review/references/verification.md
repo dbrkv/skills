@@ -81,9 +81,12 @@ needs_review is for a real code defect whose exploitability hinges on exactly
 one fact; "the code lacks a control the platform usually supplies" is not a
 defect. The routing decision is made **before** verification and is
 exclusive: a deployment-fact candidate goes only to a hardening note (it
-never reaches a verifier); a candidate that was sent to verification and got
-rejected becomes only a rejected record (no note, no duplicate under an
-H-id). One candidate, one bucket.
+never reaches a verifier; the note lists its board ids in `candidates[]`);
+a candidate that was sent to verification and got rejected becomes only a
+rejected record (no note, no duplicate under an H-id). One candidate, one
+bucket. Routing skips the verifier, so only a medium/low `severity_guess`
+may be routed; a high/critical candidate goes to verification, where a
+refutation on the deployment fact needs the second verifier like any other.
 
 **Invalid output** (unparseable, prose, contract violation): re-run once with
 a fresh verifier; a second failure → `needs_review` with
@@ -119,7 +122,10 @@ the first verdict:
    Phase 1 recheck pass and in recheck mode alike.
 
 Agreement → the verdict stands. Disagreement → for (1) the finding stays
-open: status `likely` or `needs_review`; for (2) the result is `still_open`;
+open: status `likely` when the second verifier found the issue real
+(confirmed or likely), `needs_review` when it named a missing fact — never
+`confirmed`, since one of two verifiers refuted it; for (2) the result is
+`still_open`;
 in both cases `disputed: true`, `verifier_reasons` holds both justifications
 verbatim, and the report shows the disagreement.
 

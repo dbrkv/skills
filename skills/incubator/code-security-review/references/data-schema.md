@@ -113,6 +113,9 @@ and is not duplicated here. The branches:
 - `id` (`F-NNNN`) is the primary key: unique within a snapshot, stable across
   snapshots for the same root cause. Id reuse comes from Phase 4 matching,
   never from recomputing a fingerprint.
+- Board ids (`<unit>-c<N>`) are unique for the whole run: the counter per
+  unit continues across waves, so a unit re-scouted in a later wave never
+  reuses an id.
 - `merged_from[]` lists the `candidates.jsonl` board ids that deduped into
   this record (findings and rejected records). Accounting rule: every board
   candidate maps to exactly one bucket — a finding's or rejected record's
@@ -127,14 +130,28 @@ and is not duplicated here. The branches:
   identity — a reworded fix must not mint a new id.
 - `severity` present iff status is confirmed or likely. A disputed finding
   may carry severity (provisional); needs_review never does.
+- `disputed: true` from verification (one verifier refuted, the other did
+  not) leaves the finding `likely` or `needs_review`, never `confirmed`. Only
+  a recheck dispute (a closure the second verifier did not accept, so
+  `last_recheck` is set) may keep a `confirmed` status.
 - `source_ref` and `verdict_source_ref` are commit hexes (7–40 chars), never
   a branch name or HEAD — a moving ref would suppress rejections forever.
 - A needs_review finding carries a `reason_code`: `missing_fact` (the
   verifier's unresolved fact — `missing_fact` is then required and
   non-empty), `validator_output_invalid`, `not_validated` (the verifier
-  cap), or `no_independent_verifier` (linear mode or a verifier launch that
-  failed twice — see `verification.md`) — the latter three carry
-  `missing_fact: null`.
+  cap), or `no_independent_verifier` (linear mode, a verifier launch that
+  failed twice, or a second verifier that failed or was never launched —
+  see `verification.md`) — the latter three carry `missing_fact: null`.
+  `validator_output_invalid` and `no_independent_verifier` are degradation:
+  a record given either code in this run has its id in
+  `coverage.json.degradation.findings` (or `verification` among the degraded
+  phases). `not_validated` is the verifier cap, a budget cut rather than a
+  failure: it is reported and listed in the report, not in degradation.
+- Verdict fields (`confidence`, `reachability`, `exploitability`,
+  `existing_mitigations`, `exploitation_path`) come only from a verdict. A
+  needs_review record no verifier produced (`not_validated`,
+  `validator_output_invalid`) carries none of them — no defaults are
+  filled in.
 - `validated_in_context: true` marks a record whose verdict was produced in
   the orchestrator's context (linear mode, or a medium/low finding verified
   in-context after its verifier launch failed twice) instead of by an
@@ -185,17 +202,24 @@ and is not duplicated here. The branches:
     {"what": "queue consumer input unvalidated", "why": "critic: no unit covered src/worker", "source": "critic"}
   ],
   "hardening_notes": [
-    {"id": "H-001", "file": "src/server.js", "where": "helmet config", "note": "no CSP", "recommendation": "add CSP"}
+    {"id": "H-001", "file": "src/server.js", "where": "helmet config", "note": "no CSP", "recommendation": "add CSP"},
+    {"id": "H-002", "file": "src/server.js", "where": "listen()", "note": "R9: TLS terminates outside the repo", "recommendation": "confirm TLS at the proxy", "candidates": ["http-public::unauthenticated-c3"]}
   ]
 }
 ```
 
 Unit statuses: `covered` (non-empty checks), `candidate` (checks + linked
-findings), `blocked` (reason required). Hardening notes live here — they are
+findings), `blocked` (reason required), `deferred` (never scouted — the
+budget or the wave limit stopped the run; reason required, and the run is
+incomplete). Checks belong to the unit they were gathered for — a scout
+covering several units reports each unit's checks separately. Hardening notes live here — they are
 not findings, carry no severity, and are counted nowhere in the findings
 summary. A candidate is either a hardening note or a verified record
 (finding / rejected), never both: the routing decision is made before
-verification (`verification.md`, `scouts.md` Phase 4). `scope_exclusions`
+verification (`verification.md`, `scouts.md` Phase 4). A note that a board
+candidate was routed into lists that board id in `candidates[]` — the
+note is then the candidate's bucket in the board accounting; only a
+medium/low `severity_guess` may be routed. `scope_exclusions`
 lists the tool directories and files (`.agents/`, `.claude/`, `.cursor/`,
 `skills-lock.json`, ...) excluded from the scope in Phase 0 — each with a
 reason, so "not scanned" is always stated, never silent.
@@ -242,8 +266,8 @@ python3 scripts/validate_findings.py <run>/findings.json --prev <latest-run-dir>
 ```
 
 The validator first checks the shared schemas themselves: every file in
-`references/schemas/` must be a valid JSON Schema object, the four expected
-schemas (candidate, verdict, recheck-verdict, finding-record) must exist,
+`references/schemas/` must be a valid JSON Schema object, the five expected
+schemas (candidate, scout-result, verdict, recheck-verdict, finding-record) must exist,
 and their enums must agree with the constants the validator enforces — a
 schema that drifted from the validator fails the run before any finding
 does. It then fails the file when: the JSON is unparseable; `kind` is not
@@ -271,11 +295,23 @@ omitted where the verdict ran in-context: a rejected or fixed record whose id
 is in `degradation.findings` must carry `validated_in_context: true`, and
 when `verification` is a degraded phase, so must every rejected record whose
 verdict was made in this run (`verdict_date` equals the run date and it is
-not carried verbatim from `--prev`). With `--board
+not carried verbatim from `--prev`); a needs_review record given
+`validator_output_invalid` or `no_independent_verifier` in this run must
+have its id in `degradation.findings` unless `verification` is a degraded
+phase. Independently of coverage.json, it fails when a disputed finding is
+`confirmed` without a `last_recheck` (a verification dispute never
+confirms), or when a needs_review record with `not_validated` or
+`validator_output_invalid` carries verdict fields (`confidence`,
+`reachability`, `exploitability`, `existing_mitigations`,
+`exploitation_path`) that no verifier produced. With `--board
 candidates.jsonl`, it additionally fails when any board candidate id is not
-accounted for in a finding's or rejected record's `merged_from` or a
-suppressed entry's `candidates` — no candidate may vanish between the board
-and the snapshot — or when a board line misses a required field of
+accounted for in a finding's or rejected record's `merged_from`, a
+suppressed entry's `candidates`, or a coverage.json hardening note's
+`candidates` — no candidate may vanish between the board and the snapshot
+— or lands in more than one of those buckets; when a board id appears on
+two lines; when a hardening note holds a candidate whose `severity_guess`
+is high or critical (routing skips the verifier, which only medium/low may
+do); or when a board line misses a required field of
 `candidate.schema.json`. With `--prev <run-dir>` (the base snapshot of a recheck, or
 the previous run of a full run), it additionally fails when a rejected record
 carried without re-verify — the same `verdict_date` as the base — differs

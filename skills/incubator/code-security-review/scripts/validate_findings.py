@@ -28,8 +28,12 @@ DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 HEX_REF_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
 
 SCHEMAS_DIR = Path(__file__).resolve().parent.parent / "references" / "schemas"
-EXPECTED_SCHEMAS = ("candidate.schema.json", "verdict.schema.json",
+EXPECTED_SCHEMAS = ("candidate.schema.json", "scout-result.schema.json", "verdict.schema.json",
                     "recheck-verdict.schema.json", "finding-record.schema.json")
+VERDICT_FIELDS = ("confidence", "reachability", "exploitability",
+                  "existing_mitigations", "exploitation_path")
+UNVERIFIED_CODES = {"not_validated", "validator_output_invalid"}
+DEGRADED_CODES = {"validator_output_invalid", "no_independent_verifier"}
 
 
 def bad_hex(field, value, where):
@@ -39,7 +43,7 @@ def bad_hex(field, value, where):
 def validate_schemas(schemas_dir: Path = None) -> list:
     """The shared schemas in references/schemas are the contract behind the
     prompts, the workflow graph, and this validator. Every file there must be
-    a JSON Schema object, the four expected schemas must exist, and their
+    a JSON Schema object, the five expected schemas must exist, and their
     enums must agree with the constants this validator enforces — a drifted
     schema means prompts and validation no longer describe the same data."""
     errs = []
@@ -195,10 +199,18 @@ def validate(data: dict, path: Path, prev: dict = None) -> list:
                 has_fact = bool(rec.get("missing_fact"))
                 if (reason_code == "missing_fact") != has_fact:
                     err(f"{where}: missing_fact must be non-empty exactly when reason_code is missing_fact")
+                if reason_code in UNVERIFIED_CODES:
+                    filled = [f for f in VERDICT_FIELDS if rec.get(f) not in (None, [], "")]
+                    if filled:
+                        err(f"{where}: needs_review/{reason_code} had no verdict, yet carries "
+                            f"verdict field(s) {', '.join(filled)} — no defaults are filled in")
         if rec.get("disputed"):
             reasons = rec.get("verifier_reasons")
             if not isinstance(reasons, list) or len(reasons) < 2:
                 err(f"{where}: disputed requires both verifier_reasons (>= 2)")
+            if status == "confirmed" and rec.get("last_recheck") is None:
+                err(f"{where}: a verification dispute (one verifier refuted) leaves the finding "
+                    "likely or needs_review, never confirmed")
         lr = rec.get("last_recheck")
         if lr is not None:
             if not lr.get("run_id"):
@@ -364,8 +376,18 @@ def validate_coverage(coverage_path: Path, data: dict, prev: dict = None) -> lis
             if isinstance(rec, dict) and rec.get("id") in fids and not rec.get("validated_in_context"):
                 errs.append(f"{key} {rec.get('id')}: listed in coverage.json degradation.findings "
                             "but lacks validated_in_context: true")
+    run_date = str(data.get("date", ""))[:10]
+    if "verification" not in phases:
+        for rec in data.get("findings") or []:
+            if not isinstance(rec, dict) or rec.get("status") != "needs_review":
+                continue
+            code = rec.get("reason_code")
+            if code in DEGRADED_CODES and rec.get("verdict_date") == run_date \
+                    and rec.get("id") not in fids:
+                errs.append(f"finding {rec.get('id')}: needs_review/{code} in this run is a "
+                            "degraded verdict, but its id is not in coverage.json "
+                            "degradation.findings")
     if "verification" in phases:
-        run_date = str(data.get("date", ""))[:10]
         prev_rej = {r.get("id"): r for r in (prev or {}).get("rejected", []) if isinstance(r, dict)}
         for rec in data.get("rejected") or []:
             if not isinstance(rec, dict) or rec.get("validated_in_context"):
@@ -380,15 +402,18 @@ def validate_coverage(coverage_path: Path, data: dict, prev: dict = None) -> lis
     return errs
 
 
-def validate_board(board_path: Path, data: dict, candidate_required=None) -> list:
-    """Every candidate on the board maps to a bucket: a finding's or rejected
-    record's merged_from, or a suppressed entry's candidates. None vanish.
-    Each board line also satisfies the required fields of
-    candidate.schema.json — the schema is the single source of the board
-    record's shape."""
+def validate_board(board_path: Path, data: dict, candidate_required=None,
+                   coverage_path: Path = None) -> list:
+    """Every candidate on the board maps to exactly one bucket: a finding's or
+    rejected record's merged_from, a suppressed entry's candidates, or a
+    coverage.json hardening note's candidates (routing — medium/low only).
+    None vanish, none count twice, and board ids are unique. Each board line
+    also satisfies the required fields of candidate.schema.json — the schema
+    is the single source of the board record's shape."""
     errs = []
     required = list(candidate_required or [])
     board_ids = set()
+    severity_of = {}
     try:
         for line in board_path.read_text().splitlines():
             line = line.strip()
@@ -397,7 +422,11 @@ def validate_board(board_path: Path, data: dict, candidate_required=None) -> lis
             rec = json.loads(line)
             cid = rec.get("id") or rec.get("local_id") or rec.get("candidate_id")
             if cid:
+                if str(cid) in board_ids:
+                    errs.append(f"board candidate id {cid} appears on more than one line — "
+                                "board ids are unique for the whole run")
                 board_ids.add(str(cid))
+                severity_of[str(cid)] = rec.get("severity_guess")
             missing = [f for f in required if not rec.get(f)]
             if missing:
                 errs.append(f"board candidate {cid}: missing required field(s) "
@@ -406,15 +435,34 @@ def validate_board(board_path: Path, data: dict, candidate_required=None) -> lis
         return [f"board {board_path.name}: unreadable ({e})"]
     if not board_ids:
         return ["board holds no candidate ids"]
-    covered = set()
+    buckets = Counter()
     for rec in data.get("findings", []) + data.get("rejected", []):
-        covered.update(str(c) for c in rec.get("merged_from", []))
+        buckets.update({str(c) for c in rec.get("merged_from", [])})
     for s in data.get("suppressed", []):
-        covered.update(str(c) for c in s.get("candidates", []))
-    lost = sorted(board_ids - covered)
-    for cid in lost:
+        buckets.update({str(c) for c in s.get("candidates", [])})
+    if coverage_path is None:
+        coverage_path = board_path.parent / "coverage.json"
+    notes = []
+    if coverage_path.is_file():
+        try:
+            cov = json.loads(coverage_path.read_text())
+            notes = cov.get("hardening_notes", []) if isinstance(cov, dict) else []
+        except (json.JSONDecodeError, OSError):
+            notes = []                    # validate_coverage reports it
+    for note in notes if isinstance(notes, list) else []:
+        routed = {str(c) for c in (note.get("candidates") or [])} if isinstance(note, dict) else set()
+        buckets.update(routed)
+        for cid in sorted(routed):
+            if severity_of.get(cid) in ("high", "critical"):
+                errs.append(f"hardening note {note.get('id')}: holds board candidate {cid} "
+                            f"with severity_guess {severity_of[cid]} — a high/critical "
+                            "candidate is never routed past the verifier")
+    for cid in sorted(board_ids - set(buckets)):
         errs.append(f"board candidate {cid} is not accounted for "
-                    "(finding/rejected merged_from, suppressed candidates)")
+                    "(finding/rejected merged_from, suppressed candidates, hardening note candidates)")
+    for cid in sorted(c for c in board_ids if buckets[c] > 1):
+        errs.append(f"board candidate {cid} sits in {buckets[cid]} buckets — "
+                    "one candidate, one bucket")
     return errs
 
 
@@ -494,7 +542,8 @@ def main(argv):
             errs.append(prev_err)
     errs += validate(data, path, prev_data)
     if board is not None:
-        errs += validate_board(board, data, candidate_required_fields())
+        errs += validate_board(board, data, candidate_required_fields(),
+                               path.parent / "coverage.json")
     if prev_data is not None:
         errs += validate_prev(prev_data, data)
     if errs:

@@ -14,6 +14,12 @@ When this skill runs as a workflow, the orchestrator script is the parent:
 it holds the budget, applies every invariant below, and is the only writer
 of run files. Subagents are read-only analysts.
 
+This file says **what the graph must do**, not how one API spells it. The
+code examples name primitives, not a required syntax. Translating the graph
+into a script is half the job; the other half is checking that script
+against the concrete harness — its concurrency, payload limits, failure
+semantics — before the run starts (§9).
+
 Terms used below: **scouts** (agents that hunt candidates), **candidates board**
 (`candidates.jsonl`), **needs_review**, **units** (surface × trust boundary
 coverage units) — as defined in `references/scouts.md` and
@@ -92,12 +98,16 @@ response. "Receives" is exhaustive — anything not listed is not sent.
 
 ### N3 · Unit builder (×1)
 
-- **Role.** Turn recon facts into coverage units (surface × trust boundary).
+- **Role.** Turn recon facts into coverage units (surface × trust
+  boundary), and draft the threat model in the same call.
 - **Receives.** All recon facts, the known-findings list (ids + fingerprints
-  + titles), prior coverage gaps from the latest full snapshot, the unit
-  rules (`references/scouts.md`).
+  + titles), prior coverage gaps from the latest full snapshot, the previous
+  threat model's path (for the diff section), the unit rules
+  (`references/scouts.md`), the model template (`references/recon.md`,
+  Synthesis).
 - **Returns.** The unit list: `{id, paths, threat classes, recon notes}` —
-  the seed of `coverage.json.units`.
+  the seed of `coverage.json.units` — and the threat-model markdown, which
+  the parent writes as `threat-model.md`. No separate model-writer node.
 - **Instances.** 1, after the N1 barrier.
 - **Failure.** Invalid → one repair round; still failing → abort the run:
   units are the spine, nothing downstream can run (report says so; no
@@ -110,15 +120,22 @@ response. "Receives" is exhaustive — anything not listed is not sent.
   threat-class entries (+ `ai-and-llm.md` blocks when relevant); trust rules
   R1–R10; the hunting method; the known-findings list (ids + fingerprints +
   titles); the response contract.
-- **Returns.** Unit results (checks per unit, disposition
-  covered/candidate/blocked), `candidates[]` per
-  `references/schemas/candidate.schema.json`, `uncovered[]`, `hardening[]`.
+- **Returns.** `references/schemas/scout-result.schema.json`: one result
+  per unit — that unit's checks, `candidates[]` (fields per
+  `candidate.schema.json`), `uncovered[]`, `hardening_notes[]`. The parent
+  derives each unit's status from its own result: candidates → `candidate`,
+  checks only → `covered`, neither → `blocked`. Checks are never copied
+  across units of a group; a unit absent from the results stays planned.
+- **Board ids.** The parent mints `<unit>-c<N>` with one counter per unit
+  **for the whole run** — a unit re-scouted in a later wave continues its
+  numbering, never restarts it.
 - **Instances.** ⌈units / 6⌉ per wave (groups keep related units together —
   one subsystem per scout when possible).
 - **Failure.** Invalid response → re-run once with a fresh scout; second
-  failure → its units become `blocked` with the reason in `coverage.json`.
-  A scout never sees other scouts' outputs, any verdict, or the hard
-  exclusions.
+  failure → its units become `blocked` with the reason in `coverage.json`,
+  and `scouts` goes to `degradation.phases`. A candidate that fails its
+  schema is logged and listed in gaps, never silently dropped. A scout never
+  sees other scouts' outputs, any verdict, or the hard exclusions.
 
 ### N5 · Coverage critic (×1 per wave + 1 final)
 
@@ -129,9 +146,14 @@ response. "Receives" is exhaustive — anything not listed is not sent.
   reasons), `stop` (its cleanliness verdict).
 - **Instances.** One after each scout wave (barrier on the wave), plus one
   final-clean critic before the run may claim complete coverage.
+- **Clean means proposes nothing.** Coverage is clean only when the final
+  critic returns no missing units and no reassignments; `stop: true` next to
+  a proposal is not clean — the proposal is acted on. A missing unit whose id
+  already exists is a reassignment of that unit, not a second unit.
 - **Failure.** No result → the wave's coverage stands as-is; whatever the
-  critic would have checked is logged as an open gap, and the run is marked
-  incomplete when the final critic is the one that failed.
+  critic would have checked is logged as an open gap, `critic` goes to
+  `degradation.phases`, and the run is marked incomplete when the final
+  critic is the one that failed.
 
 ### N6 · Consolidator (×1, barrier)
 
@@ -140,9 +162,16 @@ response. "Receives" is exhaustive — anything not listed is not sent.
   control, same point of failure, same fix). Similar-but-independent defects
   are not a group.
 - **Receives.** Every board candidate as `{board id, unit, fingerprint,
-  title, root-cause summary}` — nothing else.
+  title, root-cause summary}`, plus the deployment-control rule
+  (`references/verification.md`) — nothing else.
 - **Returns.** Merge groups `{canonical, duplicates[], note}`; empty when no
-  duplicates.
+  duplicates. It may also **propose** routing a root cause to a hardening
+  note when its only deciding fact is a deployment control. The parent
+  applies a proposal only when every merged candidate's `severity_guess` is
+  medium or low — the note then lists their board ids in `candidates[]`
+  and nothing about them goes to `rejected`. A high/critical proposal is
+  ignored: the root cause goes to N7 like any other (routing skips the
+  verifier, which a high/critical candidate never may).
 - **Instances.** 1, after the last wave.
 - **Failure.** No result → run without merges (duplicate candidates stay
   separate; Phase 4 matching against the snapshot still reuses known ids).
@@ -158,8 +187,14 @@ response. "Receives" is exhaustive — anything not listed is not sent.
   `min(20, validation allowance)` (§4), ordered by `severity_guess`
   descending, ties by confidence then path.
 - **Failure.** Invalid output → one repair round; second failure →
-  `needs_review` with `reason_code: validator_output_invalid`. Launch failed
-  twice → linear-mode rules for that id alone + degradation entry.
+  `needs_review` with `reason_code: validator_output_invalid`, the id in
+  `degradation.findings`. Launch failed twice → linear-mode rules for that
+  id alone + degradation entry.
+- **Record fields.** The record's verdict fields (`confidence`,
+  `reachability`, `exploitability`, `existing_mitigations`,
+  `exploitation_path`) are copied from the verdict that decided it. A
+  record no verdict produced (`not_validated`, `validator_output_invalid`)
+  carries none of them — never a default value.
 
 ### N8 · Second verifier (conditional, blind)
 
@@ -172,10 +207,16 @@ response. "Receives" is exhaustive — anything not listed is not sent.
   closures).
 - **Instances.** 0–1 per qualifying verdict; billed to the validation
   reserve.
-- **Failure.** No result → the consequential verdict does not take effect:
-  the rejection becomes `needs_review` with `no_independent_verifier`, the
-  closure becomes `still_open`; `disputed` only on an actual disagreement
-  (both justifications kept verbatim).
+- **Disagreement.** A rejection the second verifier does not share stays
+  open with `disputed: true` and both reasons verbatim: `likely` when the
+  second verifier found the issue real (confirmed or likely),
+  `needs_review` with its missing fact when it named one — **never
+  `confirmed`**, since one of the two refuted it.
+- **Failure.** No result, or no budget left to launch it → the
+  consequential verdict does not take effect: the rejection becomes
+  `needs_review` with `no_independent_verifier` (the id in
+  `degradation.findings`), the closure becomes `still_open`; `disputed`
+  only on an actual disagreement.
 
 ### N9 · Findings collector (deterministic assembly + repair agent)
 
@@ -193,6 +234,16 @@ response. "Receives" is exhaustive — anything not listed is not sent.
 - **Instances.** 1 deterministic assembly (costs no agent call); 0–2 repair
   agent calls.
 - **Failure.** Failing the validator gate is its failure mode — see §5.
+
+### Report text
+
+REPORT.md is the parent's file. A parent that is an agent writes it itself.
+A parent that is a script (it cannot author prose) uses **one** writer agent
+that reads findings.json, coverage.json, and threat-model.md by path and
+returns the markdown: every count is copied from `summary`, never
+recomputed. If that agent fails, the script falls back to a report
+assembled by code from the same files, and says so in the header. The
+writer costs one call from the tail reserve (§4).
 
 ### N10 · Report reviewer (×1)
 
@@ -240,6 +291,8 @@ N9 collector — deterministic assembly (merges, verbatim carry,
 parent: write findings.json + coverage.json (execution,
         degradation, gaps) — BEFORE the first validator run,
         so the coverage checks sit inside the repair loop
+        (in the script when it can run commands — P5 —
+         otherwise in the main agent after the script returns)
    ▼
 GATE: validate_findings.py (§5) ─► repair ≤2× (agent fixes
         records; the parent fixes coverage-side errors)
@@ -279,14 +332,22 @@ fan-out:
     `max(4, ceil(0.3 × (B − used)))` — verifiers **and** second verifiers
     (N8 in verification and in recheck alike) draw from it together;
   - critic reserve: 2 (the coming wave's critic + the final critic);
-  - tail reserve: 3 (reviewer N10 + up to 2 N9 repair rounds).
+  - tail reserve: 3 (reviewer N10 + up to 2 N9 repair rounds), +1 when a
+    script parent needs a writer agent for REPORT.md.
+- **Every call counts where it is spent.** A retry or repair round is a
+  call like the first attempt and draws from the same reserve as the call
+  it repeats. `B` is a hard stop: a call that would exceed it is not made —
+  the item it was for follows that node's failure rule.
 - **Scout allowance** per wave: `B − used − all reserves`; units beyond it
-  are deferred with reason `budget` (logged + coverage gaps), not dropped.
+  are deferred with reason `budget` (logged + coverage gaps), not dropped —
+  and a deferred unit makes the run **incomplete**: coverage with deferred
+  units is never clean.
 - **Verifier cap**: at most 20 verifiers per run, and never more than the
-  validation allowance left after the waves — `min(20, allowance)`; each
-  second verifier consumes the same allowance first (the consequential
-  verdicts outrank extra verifications). Leftover root causes →
-  `needs_review` / `not_validated`.
+  validation allowance left after the waves. Second verifiers outrank extra
+  first verifications, so admit root causes in queue order while
+  `admitted + high/critical among them (one N8 slot each) ≤ allowance`, up
+  to 20. Leftover root causes → `needs_review` / `not_validated` (a budget
+  cut, reported — not degradation).
 - When a reserve would go negative, the run stops honestly: mark incomplete,
   log the reason, remaining units → gaps.
 
@@ -331,7 +392,7 @@ and every verification batch — the log is the dashboard.
 ## 7. Invariants
 
 The generated script must uphold all of these; check them against the script
-before launching the run:
+before launching the run (the procedure is §9):
 
 1. **Files are written only by the parent.** Agents read; the parent (script
    via P5, or the main agent around the workflow) is the sole writer of
@@ -353,6 +414,25 @@ before launching the run:
    and the affected verdict follows the linear-mode rules
    (`references/verification.md`) for that finding alone. The run also
    records `coverage.json.execution: "workflow"` so the mode is auditable.
+7. **Fan-outs run concurrently.** Every fan-out — recon, the scouts of one
+   wave, rechecks, verifiers — starts all its calls before waiting on any
+   of them. Sequential order is allowed only where the graph is sequential:
+   the wave loop, and the chain inside one item (call → retry, verifier →
+   second verifier). Waiting on each call inside a loop over a fan-out's
+   items turns the workflow into a slow linear run.
+8. **Nothing is invented.** Ids come only from `run_store.py next-id` — if
+   it fails or returns fewer ids than needed, the run stops (no made-up
+   ids). Record fields come only from the agent output that decided them —
+   no defaults for verdict fields. The run's final summary is derived from
+   state: it claims "every root cause verified" or "reviewed" only when
+   that happened.
+9. **Board ids are unique for the run** (one counter per unit across all
+   waves), and every board candidate lands in exactly one bucket.
+10. **Any file rewritten after the gate is re-validated.** If degradation,
+    a reviewer correction, or anything else changes findings.json or
+    coverage.json after the validator printed OK, both are regenerated
+    together and the validator runs again — the `degraded` flag and the
+    degradation lists must still agree.
 
 ## 8. Pseudocode
 
@@ -381,19 +461,23 @@ run audit (BUDGET = ceil(1.2 × estimate), MAX_WAVES=3):
     wave += 1
     allowance = BUDGET - used - reserve
     groups = chunk(units.planned, 6)[:allowance]               # the rest deferred "budget" -> gaps
-    results = barrier [ agent(scout(g)) for g in groups ]      # candidate schema
-    parent: append valid candidates to candidates.jsonl; invalid -> one retry, then blocked
+    if some groups deferred: incomplete = "budget"             # still scout the admitted ones
+    results = barrier [ agent(scout(g)) for g in groups ]      # all launched at once; scout-result schema
+    parent: per unit result -> that unit's checks + status; board ids from the run-wide counter
+            append valid candidates to candidates.jsonl; invalid response -> one retry, then blocked
     critic = agent(critic, coverage + threat model + titles)   # fresh every wave
-    units += critic.missing_units; requeue critic.reassign
-    if nothing planned and critic.proposed nothing:
+    units += critic.missing_units (new ids only); requeue critic.reassign
+    if nothing planned and critic.proposed nothing and incomplete is none:
       final = agent(final-critic, coverage)                    # second opinion
-      if final.proposed nothing: coverage_clean = true; break
+      if final.proposed nothing: coverage_clean = true; break  # stop:true alone is not clean
+      units += final.missing_units; requeue final.reassign
 
-  merges = agent(consolidator, board candidates)               # N6 barrier, before verification
-  parent: apply merges (merged_from); match latest snapshot;
-          next-id --count N for fresh root causes
+  merges, routes = agent(consolidator, board candidates)       # N6 barrier, before verification
+  parent: apply merges (merged_from); apply routes only for medium/low -> hardening notes
+          match latest snapshot; next-id --count N for fresh root causes
+          next-id failed or short -> stop the run                # ids are never invented
 
-  cap = min(20, validation allowance left)
+  cap = min(20, root causes admitted with one N8 slot per high/critical)   # §4
   queue = root causes by severity_guess desc, confidence, path
   verdicts = pipeline queue[:cap] as rc:                       # N7, each on its own
       v = agent(verifier, rc.bundle)                           # verdict schema
@@ -402,7 +486,8 @@ run audit (BUDGET = ceil(1.2 × estimate), MAX_WAVES=3):
       if launch failed twice -> linear rules for rc.id + degradation
       if v.status == rejected and rc.severity_guess in high,critical:
           v2 = agent(verifier, rc.bundle)                      # N8 BLIND
-          disagree -> stays open, disputed, both reasons kept
+          disagree -> likely / needs_review (never confirmed), disputed, both reasons kept
+          no v2     -> needs_review "no_independent_verifier" + degradation
       return v
   queue[cap:] -> needs_review "not_validated"                  # logged, report lists them
 
@@ -419,6 +504,65 @@ run audit (BUDGET = ceil(1.2 × estimate), MAX_WAVES=3):
   if not ok: report "snapshot not ready" with errors; stop     # no OK, no report
   parent: write threat-model.md + REPORT.md (header: execution mode)
   fixes = agent(reviewer, REPORT + findings)                   # N10, downgrade-only
-  parent: apply fixes; re-validate; issue report
+  parent: apply fixes; rewrite findings.json + coverage.json together; re-validate; issue report
   return conclusion(complete/incomplete + reason, counts, budget spent)
 ```
+
+## 9. Before launch: fit the script to the harness
+
+Sections 1–8 are harness-neutral. The script is not: every harness has its
+own concurrency model, size limits, and failure semantics, and a script that
+is correct in spirit can still run linearly, truncate a prompt, or hang on
+one agent. Before the run starts, answer each question below **for the
+harness at hand** — from its documentation or its API, not from memory of
+another harness — and adjust the script. Where an answer is unknown, design
+for the conservative case.
+
+1. **Concurrency.** Does the launch primitive actually run calls in
+   parallel, and how many at once? Does the harness queue excess calls
+   itself, or must the script throttle? Then trace every fan-out in the
+   script (§7.7): all calls launched before the first wait, no wait inside
+   a loop over items.
+2. **Payload limits.** What is the maximum size of a prompt, of an agent's
+   result, of the script's input arguments and return value, of a command's
+   arguments (on Linux one argument is capped at 128 KiB), of a log line or
+   dashboard entry? Keep large content out of prompts: pass **paths** (skill
+   references, threat-model.md, the snapshot files) and let agents read
+   them; write big files in chunks; check that findings.json and the report
+   fit whatever channel carries them.
+3. **Typed results.** Does the typed call validate the result against the
+   schema, or only parse JSON? If it only parses, validate in code — the
+   required fields, enums, the echoed id — and treat a violation as invalid
+   output (one repair round, then the node's failure rule).
+4. **Failure semantics.** How does a failed call surface — an exception,
+   `null`, a timeout, a partial object? Does the harness retry on its own
+   (so the script must not double the retries or the budget count)? Is there
+   a per-call timeout? A hung agent must end as a failure, never stall a
+   barrier forever.
+5. **Determinism and resume.** Are the clock and randomness available? Does
+   the harness resume or cache calls on re-run? Take dates and the run id
+   from a command or the input arguments, never from a call that breaks
+   resume.
+6. **Processes and files.** Can the script run commands and write files
+   (P5)? From which working directory do commands and agents resolve
+   relative paths? Use absolute paths for the skill directory, the
+   repository, and the run directory; confirm agents can read the skill's
+   `references/` from where they run.
+7. **Read-only agents.** Can the harness restrict an agent's tools (no
+   write, no shell, no network)? Use the restriction when it exists — the
+   read-only persona alone is the weaker guarantee.
+8. **Budget.** Does the harness count calls or tokens itself, with a hard
+   ceiling? Align `B` with it, and make sure the script's own counter
+   increments on every call, retries included (§4).
+9. **Language and runtime.** Which script language and dialect (types,
+   top-level await, top-level return), which globals?
+
+Record the answers as a short comment block at the top of the script —
+the harness, its limits, and what each one changed in the script — so the
+user can review the decisions before approving the run. Then walk §7
+against the script one invariant at a time: list every fan-out with its
+concurrency shape, every place a record is built with where each field
+comes from, and every exit path with the gap or degradation entry it
+writes. Fix what does not hold before launching; a script that cannot
+uphold an invariant on this harness says so in that comment block, and
+the proposal line tells the user.

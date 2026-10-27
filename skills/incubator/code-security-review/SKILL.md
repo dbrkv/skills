@@ -16,7 +16,7 @@ description: |
   Do NOT trigger to explain security concepts, write security documentation,
   or configure scanners or CI (gitleaks, semgrep, Snyk, Dependabot).
 metadata:
-  version: "2.2.0"
+  version: "2.3.0"
   user-invocable: "true"
 ---
 
@@ -78,11 +78,13 @@ way the run went.
 | recheck: few open findings (≤ 20) | subagents |
 | recheck: many open findings (> 20) | propose workflow |
 
-Estimate before choosing: `3 (recon) + 1.3 × open findings (recheck, second
-verifiers included) + units (scouts) + 2 (critics) + 1.3 × min(20,
-candidates) (verifiers, second verifiers included) + 3 (tail: review plus
-repair rounds — the findings.json assembly itself is deterministic code,
-not an agent call)`.
+Estimate before choosing: `3 (recon) + 1 (unit builder) + 1.3 × open
+findings (recheck, second verifiers included) + units (scouts — one per
+unit with subagents; a workflow groups up to 6 units per scout, so its own
+scout count is ⌈units / 6⌉ per wave) + 2 (critics) + 1 (consolidator) +
+1.3 × min(20, candidates) (verifiers, second verifiers included) + 3
+(tail: review plus repair rounds — the findings.json assembly itself is
+deterministic code, not an agent call)`.
 A typical small repository (6–12 units, ≤ 30 code files) lands at 30–45
 calls; a large one (units beyond 12, several subsystems with their own entry
 surfaces, multi-wave coverage ahead) passes 60. Past roughly 45 calls the
@@ -100,6 +102,9 @@ Rules:
   the default workflow budget (⌈1.2 × N⌉ agent calls, rounded up), and the
   reason — then wait for the answer. Without consent, run subagents. The
   user may set a different budget; `references/workflow.md` runs on it as B.
+  Before launching, fit the script to the harness and check it against the
+  workflow invariants (`references/workflow.md` §9) — concurrency, payload
+  limits, failure semantics.
 - If the harness has no workflow support, run subagents. If there is no
   agent-launching tool at all, run linearly (rules below).
 - `coverage.json.execution` records how the run went (`workflow` /
@@ -220,7 +225,7 @@ an unauthenticated injection that reads arbitrary tables anchors at critical
 - `references/scouts.md` — Phases 2–4: scout assignment, invariant hunting method, candidate board, coverage critic, dedup
 - `references/verification.md` — Phases 5–7: verifier pool, second-verifier rule, severity, report reviewer; recheck mode
 - `references/workflow.md` — the harness-neutral workflow graph: primitives, nodes, edges, budget, gates, invariants; used when the run goes through a workflow
-- `references/schemas/*.json` — the shared schemas (candidate, verdict, recheck verdict, findings record): the single source for every agent contract and the board check
+- `references/schemas/*.json` — the shared schemas (candidate, scout result, verdict, recheck verdict, findings record): the single source for every agent contract and the board check
 - `references/trust-rules.md` — trust rules R1–R10, hard exclusions, precedents
 - `references/threat-classes.md` — the threat taxonomy: classes, control essence, CWE anchors
 - `references/data-schema.md` — snapshot layout, findings.json / coverage.json shapes, fingerprint format

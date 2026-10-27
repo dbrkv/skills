@@ -1,0 +1,74 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "scout-result.schema.json",
+  "title": "Scout result",
+  "description": "What one scout returns for its assigned units: one element per unit, so coverage evidence stays attached to the unit it was gathered for. A scout with one unit returns one element. The orchestrator derives each unit's status from its element (candidates -> candidate, checks only -> covered, neither -> blocked) and mints board ids; the scout never does. Read by scout prompts and the workflow graph.",
+  "type": "object",
+  "required": ["results"],
+  "properties": {
+    "results": {
+      "type": "array",
+      "description": "One element per assigned unit. A unit missing here was not scouted: it stays planned for the next wave, it is never marked covered.",
+      "items": {
+        "type": "object",
+        "required": ["unit", "checks", "candidates", "uncovered", "hardening_notes"],
+        "properties": {
+          "unit": {
+            "type": "string",
+            "description": "The assigned unit id (<surface>::<boundary>), exactly as given."
+          },
+          "checks": {
+            "type": "array",
+            "description": "Coverage evidence for THIS unit only: one entry per invariant decided, either way.",
+            "items": {
+              "type": "object",
+              "required": ["paths", "invariant", "result"],
+              "properties": {
+                "paths": {"type": "array", "items": {"type": "string"}},
+                "invariant": {"type": "string"},
+                "result": {"type": "string"}
+              }
+            }
+          },
+          "candidates": {
+            "type": "array",
+            "description": "Candidates found in this unit, each with the fields of candidate.schema.json except the board id (the orchestrator mints it); unit equals this element's unit.",
+            "items": {"type": "object"}
+          },
+          "uncovered": {
+            "type": "array",
+            "description": "Surfaces seen but not checked; they become candidate units for the critic.",
+            "items": {
+              "type": "object",
+              "required": ["surface", "boundary", "paths", "reason"],
+              "properties": {
+                "surface": {"type": "string"},
+                "boundary": {"type": "string"},
+                "paths": {"type": "array", "items": {"type": "string"}},
+                "reason": {"type": "string"}
+              }
+            }
+          },
+          "hardening_notes": {
+            "type": "array",
+            "description": "Defense-in-depth advice with no reachable boundary violation; never a candidate.",
+            "items": {
+              "type": "object",
+              "required": ["file", "where", "note", "recommendation"],
+              "properties": {
+                "file": {"type": "string"},
+                "where": {"type": "string"},
+                "note": {"type": "string"},
+                "recommendation": {"type": "string"}
+              }
+            }
+          },
+          "blocked_reason": {
+            "type": ["string", "null"],
+            "description": "Why the unit could not be checked (unreadable paths, out of scope); set only when checks and candidates are both empty."
+          }
+        }
+      }
+    }
+  }
+}
