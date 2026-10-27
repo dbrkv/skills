@@ -14,10 +14,10 @@ When this skill runs as a workflow, the orchestrator script is the parent:
 it holds the budget, applies every invariant below, and is the only writer
 of run files. Subagents are read-only analysts.
 
-Names differ across audit skills; this one uses: **scouts** (a.k.a. hunters),
-**candidates board** (a.k.a. ledger, `candidates.jsonl`), **needs_review**
-(a.k.a. needs_validation), **units** (surface × trust boundary coverage
-units). Translate on sight — the graph is the same.
+Terms used below: **scouts** (agents that hunt candidates), **candidates board**
+(`candidates.jsonl`), **needs_review**, **units** (surface × trust boundary
+coverage units) — as defined in `references/scouts.md` and
+`references/data-schema.md`.
 
 ## 1. Primitives and what harnesses call them
 

@@ -1,9 +1,7 @@
 # AI and LLM hunting classes
 
-*Adapted from `AI-AND-LLM.md` in
-[cloudflare/security-audit-skill](https://github.com/cloudflare/security-audit-skill)
-(MIT). Verdict names adapted to this skill (confirmed / likely / needs_review
-/ rejected); analysis is source-level only.*
+*Verdicts use this skill's names (confirmed / likely / needs_review /
+rejected); analysis is source-level only.*
 
 #### When to use this file
 

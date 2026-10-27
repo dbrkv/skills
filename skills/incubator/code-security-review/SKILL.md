@@ -214,8 +214,6 @@ so the trace is the demonstration. Apply the anchors to what the trace proves:
 an unauthenticated injection that reads arbitrary tables anchors at critical
 (full data-store access), not high.
 
-*(Anchors adapted from [cloudflare/security-audit-skill](https://github.com/cloudflare/security-audit-skill), MIT.)*
-
 ## References
 
 - `references/recon.md` — Phases 0–1: preparation, recon agents, STRIDE model + diff, recheck of open findings
@@ -226,7 +224,7 @@ an unauthenticated injection that reads arbitrary tables anchors at critical
 - `references/trust-rules.md` — trust rules R1–R10, hard exclusions, precedents
 - `references/threat-classes.md` — the threat taxonomy: classes, control essence, CWE anchors
 - `references/data-schema.md` — snapshot layout, findings.json / coverage.json shapes, fingerprint format
-- `references/ai-and-llm.md` — hunting classes for LLM/agent code (adapted from cloudflare/security-audit-skill, MIT)
+- `references/ai-and-llm.md` — hunting classes for LLM/agent code
 - `scripts/run_store.py`, `scripts/validate_findings.py` — repo-id / run dir / finding ids / trace-changed; findings.json validation
 
 ## Example invocations

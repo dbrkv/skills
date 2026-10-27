@@ -23,10 +23,6 @@ For diff scopes, restrict units to the diff; a full audit covers the tree.
 
 ## The hunting method: work from an invariant
 
-*(Adapted from the "Core hunting method" in
-[cloudflare/security-audit-skill](https://github.com/cloudflare/security-audit-skill)
-(HUNTING.md), MIT.)*
-
 For each assigned unit:
 
 1. Name the lower-trust principal and what it can already reach.
