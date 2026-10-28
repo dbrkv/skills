@@ -1,6 +1,6 @@
 ---
 name: code-security-review
-version: 4.0.0
+version: 4.1.0
 description: |
   Review code for security vulnerabilities by reading the source: keep a STRIDE
   threat model of the repository in docs/security/, check the requested code
@@ -28,7 +28,7 @@ user-invocable: true
 Review code for security vulnerabilities by reasoning over the source. The review has three phases and a report:
 
 ```
-Phase 1  Threat model   docs/security/threat-model.md exists? reuse it : create it
+Phase 1  Threat model   docs/security/threat-model.md exists? reuse it : create it (diff review: offer it)
 Phase 2  Scan           requested code × six STRIDE categories → candidate findings
 Phase 3  Validate       one independent refuter per candidate → status per finding
 Report                  diff review → in chat; full audit → docs/security/<date>-security-review.md
@@ -51,7 +51,7 @@ The threat model is the persistent part. It lives in the repository, is reviewed
 | `docs/security/threat-model.md` | Phase 1, updated over time | Yes. It is the shared model of the system. Accepted risks and dismissed findings live in it too. |
 | `docs/security/<YYYY-MM-DD>-security-review.md` | Full audit report | The owner decides. |
 
-A diff review writes no report: the answer goes to the conversation. It only creates the threat model if there is none yet. If the repository's agent instructions name a different location for security documents, use that instead of `docs/security/`.
+A diff review writes nothing: the answer goes to the conversation. If the repository's agent instructions name a different location for security documents, use that instead of `docs/security/`.
 
 ## Modes
 
@@ -68,7 +68,8 @@ Pick the mode from the request. If the scope is unclear, ask.
 Read `docs/security/threat-model.md`.
 
 - **It exists:** use it. If its *Last Updated* date is more than 90 days old, or the code under review adds or removes a component, entry point, or trust boundary that the model does not describe, say so in the answer and offer to refresh it. In a diff review, do not block on the refresh; review against the model as it is and note the gap.
-- **It is missing:** tell the user it does not exist yet, create it, and continue. Point out at the end that it is a new file to review and commit.
+- **It is missing, full audit or threat model only:** tell the user it does not exist yet, create it, and continue. Point out at the end that it is a new file to review and commit.
+- **It is missing, diff review:** do not create it. Review the change against the code alone, deliver the answer, and at the end offer to create the threat model (threat model only mode). The user asked about a change before a commit; a new repository-wide document is not what they are waiting for.
 
 **Read `references/threat-modeling.md` and follow it** to create or update the model. When updating, edit the existing document rather than regenerating it: keep accepted risks, keep the changelog, and add a changelog entry.
 
@@ -108,8 +109,8 @@ Severity guides the reader:
 
 | Severity | Criteria | Examples |
 |---|---|---|
-| **CRITICAL** | Exploitable now, high impact, no authentication needed | RCE, production secret in code, authentication bypass |
-| **HIGH** | Exploitable with some conditions, significant impact | SQL injection, stored XSS, IDOR |
+| **CRITICAL** | Exploitable now, high impact, no authentication needed | RCE, production secret in code, authentication bypass, SQL injection reachable without authentication |
+| **HIGH** | Exploitable with some conditions, significant impact | SQL injection behind authentication, stored XSS, IDOR |
 | **MEDIUM** | Specific conditions, moderate impact | Reflected XSS, CSRF, information disclosure |
 | **LOW** | Hard to exploit, low impact | Verbose errors, missing security headers |
 
@@ -123,7 +124,7 @@ When the user asserts a finding is safe ("the helper escapes it"), treat the cla
 
 ## Done when
 
-- [ ] The threat model was read, or created and flagged as new
+- [ ] The threat model was read, or created and flagged as new (diff review: offered, not created)
 - [ ] Every file or component in scope was checked against all six STRIDE categories, or listed as not checked
 - [ ] Every candidate has exactly one status from an independent refuter (or the report says validation was not isolated)
 - [ ] Dismissals were applied

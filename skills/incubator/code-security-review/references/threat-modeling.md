@@ -6,7 +6,7 @@ The model is a normal project document. It is written in plain language for the 
 
 ## When to create or update
 
-- **Missing**: no `docs/security/threat-model.md` yet.
+- **Missing**: no `docs/security/threat-model.md` yet, in a full audit or when the user asks for the model. A diff review only offers to create it.
 - **Architecture changed**: a component, entry point, external integration, or trust boundary was added or removed.
 - **Stale**: *Last Updated* is more than 90 days old.
 - **Asked**: the user wants it refreshed.
