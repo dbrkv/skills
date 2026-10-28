@@ -1,44 +1,23 @@
 # Notice
 
-Parts of this skill are adapted from
-[cloudflare/security-audit-skill](https://github.com/cloudflare/security-audit-skill),
-licensed under the MIT License:
+This skill adapts material from the following projects.
 
-- the severity anchors (`SKILL.md`, Severity anchors);
-- the invariant-based hunting method (`references/scouts.md`), adapted from
-  its "Core hunting method" (`HUNTING.md`);
-- the AI and LLM hunting classes (`references/ai-and-llm.md`), adapted from
-  `AI-AND-LLM.md`, with verdict names changed to this skill's;
-- the coverage model of `coverage.json` (`references/data-schema.md`) —
-  unit ids derived from source references, carrying unchanged coverage
-  between runs, the per-status state table, and validating coverage after
-  every update — reimplemented after the ideas of its coverage ledger
-  (`RECONNAISSANCE.md`, `validate-coverage-ledger.cjs`); no code was
-  copied.
+## Factory-AI/skills
 
-The adapted material was rewritten for this skill's pipeline and terms; the
-original license follows.
+<https://github.com/Factory-AI/skills>, MIT License, Copyright (c) 2025.
 
----
+The structure of this skill (a persistent STRIDE threat model, a scan, and a validation phase), the threat model template, and the STRIDE checklists started as an adaptation of the `threat-model-generation`, `commit-security-scan`, `vulnerability-validation`, and `security-review` skills. They have since been reworked: the skill is harness-neutral, keeps no JSON artifacts, validates each finding with an isolated refuter, and never executes the target.
 
-MIT License
+## anthropics/claude-code-security-review
 
-Copyright (c) 2025-2026 Cloudflare, Inc.
+<https://github.com/anthropics/claude-code-security-review>, MIT License, Copyright (c) 2025 Anthropic.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+The hard exclusions and precedents in `references/trust-rules.md` follow the false-positive filtering rules of that project, with carve-outs added for credential guessing, paid actions, and races on state that must change exactly once.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+## MIT License
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

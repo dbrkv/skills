@@ -12,7 +12,7 @@ you use one, pin a commit.
 
 | Skill | What it does |
 |-------|--------------|
-| [code-security-review](skills/incubator/code-security-review/) | Security review of code by source-level reasoning: STRIDE threat model, invariant-driven scouts, refute-first isolated verifiers, run snapshots under `~/security-audit/` that carry findings between sessions. Quick (diff, answer in chat), full audit, and recheck modes; runs via subagents, a harness workflow, or linearly. |
+| [code-security-review](skills/incubator/code-security-review/) | Security review of code by reading the source: a STRIDE threat model kept in the repository (`docs/security/threat-model.md`), a scan of the requested code across the six STRIDE categories, and an isolated refute-first validator for every finding. Diff review answers in chat; a full audit writes a dated report next to the threat model. The target is never executed. |
 | [codebase-wiki](skills/incubator/codebase-wiki/) | Reads a repository and writes a `wiki/` of interconnected markdown pages explaining what the code does and how it fits together. |
 
 ## Opinions
