@@ -40,7 +40,11 @@ layer.
 
 ## Attack classes
 
-### Context, retrieval, and memory
+Each class id (`AI-CONTEXT`, `AI-TOOL`, `AI-MCP`, `AI-OUTPUT`) is a valid
+`threat_class` and a coverage check's `class`, next to the ids of
+`threat-classes.md`.
+
+### AI-CONTEXT — Context, retrieval, and memory
 
 **Indirect injection through retrieved or ingested content** — an attacker
 writes a RAG document, indexed page, file, email, issue body, tool response,
@@ -63,7 +67,7 @@ text impersonate a system message, prior turn, tool result, or policy.
 Confirm the forged provenance changes a deterministic trust decision or
 reaches a meaningful capability.
 
-### Tool and action
+### AI-TOOL — Tool and action
 
 **Tool-argument injection into a downstream sink** — model-produced arguments
 reach SQL, shell, file, URL-fetch, or privileged APIs without handler-side
@@ -88,7 +92,7 @@ with the handler's object.
 spend, send, or mutation work without per-request budget, per-action
 authorization, cancellation, or idempotency.
 
-### MCP and sub-agent trust
+### AI-MCP — MCP and sub-agent trust
 
 **Trust inheritance** — a delegated task receives the full session,
 credentials, memory, or capabilities rather than the least authority
@@ -103,7 +107,7 @@ schemas supplied by an MCP peer are trusted as authorization. Metadata can
 guide the model; it cannot grant capability — find the deterministic
 allowlist and handler authorization that stay authoritative.
 
-### Output and disclosure
+### AI-OUTPUT — Output and disclosure
 
 **Insecure output rendering** — model output reaches an executing HTML,
 Markdown, template, URL, or command sink without the sink's required

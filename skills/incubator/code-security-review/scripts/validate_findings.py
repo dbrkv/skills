@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Validate a findings.json snapshot against references/data-schema.md.
 
-Usage: validate_findings.py PATH
+Usage:
+    validate_findings.py FINDINGS.json [--board candidates.jsonl] [--prev RUN-DIR]
+    validate_findings.py --coverage COVERAGE.json      (a live run's coverage, mid-run)
 Prints "OK" and exits 0 when the file passes; otherwise prints every error
 and exits 1. Python 3.8+, stdlib only.
 """
@@ -24,10 +26,20 @@ RECHECK_RESULTS = {"still_open", "fixed", "fixed_pending", "moved", "cant_tell"}
 DEGRADED_PHASES = {"recon", "scouts", "critic", "verification", "reviewer"}
 EXECUTION_MODES = {"workflow", "subagents", "linear"}
 ID_RE = re.compile(r"^F-\d{4,}$")
+BOARD_ID_RE = re.compile(r"^C-\d{4,}$")
+AGENT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+RUN_ID_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-\d+$")
+CLASS_HEADING_RE = re.compile(r"^### ([A-Z][A-Z0-9-]*) — ", re.M)
+COVERAGE_VERSION = 3
+UNIT_STATUSES = {"planned", "covered", "candidate", "blocked", "deferred"}
+UNIT_ORIGINS = {"new", "carried", "changed", "expired", "reopened"}
+RUN_STATUSES = {"complete", "incomplete"}
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 HEX_REF_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
 
-SCHEMAS_DIR = Path(__file__).resolve().parent.parent / "references" / "schemas"
+REFERENCES_DIR = Path(__file__).resolve().parent.parent / "references"
+SCHEMAS_DIR = REFERENCES_DIR / "schemas"
+CLASS_FILES = ("threat-classes.md", "ai-and-llm.md")
 EXPECTED_SCHEMAS = ("candidate.schema.json", "scout-result.schema.json", "verdict.schema.json",
                     "recheck-verdict.schema.json", "finding-record.schema.json")
 VERDICT_FIELDS = ("confidence", "reachability", "exploitability",
@@ -118,7 +130,20 @@ def candidate_required_fields(schemas_dir: Path = None) -> list:
     return required if isinstance(required, list) else []
 
 
-def validate(data: dict, path: Path, prev: dict = None) -> list:
+def threat_class_ids(references_dir: Path = None) -> set:
+    """Class ids are the `### ID — name` headings of the taxonomy files —
+    read from the text, never restated here."""
+    root = Path(references_dir) if references_dir else REFERENCES_DIR
+    ids = set()
+    for name in CLASS_FILES:
+        try:
+            ids.update(CLASS_HEADING_RE.findall((root / name).read_text()))
+        except OSError:
+            pass
+    return ids
+
+
+def validate(data: dict, path: Path, prev: dict = None, prev_cov: dict = None) -> list:
     errs = []
 
     def err(msg):
@@ -312,17 +337,243 @@ def validate(data: dict, path: Path, prev: dict = None) -> list:
     # writes one; a recheck references the base full snapshot's).
     coverage_file = path.parent / "coverage.json"
     if coverage_file.is_file():
-        errs += validate_coverage(coverage_file, data, prev)
+        errs += validate_coverage(coverage_file, data, prev, prev_cov)
+    elif kind == "full":
+        err("a full snapshot requires a sibling coverage.json")
 
     return errs
 
 
-def validate_coverage(coverage_path: Path, data: dict, prev: dict = None) -> list:
-    """Degradation accounting: the run's execution mode is recorded (and a
-    linear run must name its degraded phases), phases are known tokens, every
-    listed finding id resolves in this snapshot, the findings.json `degraded`
-    flag is true exactly when either degradation list is non-empty, and no
-    in-context verdict hides behind a missing `validated_in_context` flag."""
+def validate_units(cov: dict, run_id, final: bool, prev_cov: dict = None,
+                   classes: set = None) -> list:
+    """The coverage claim. Each unit's id is derived from its source refs
+    (stable across runs, so coverage can be carried); its status matches the
+    state table; every assigned threat class has a check or is listed as
+    unchecked; checks made this run are this run's, and a carried unit holds
+    its predecessor's checks verbatim. In a snapshot (final) no unit is still
+    planned, and the run status agrees with what the units show."""
+    errs = []
+    where = "coverage.json"
+    if cov.get("schema_version") != COVERAGE_VERSION:
+        errs.append(f"{where}: schema_version must be {COVERAGE_VERSION}, "
+                    f"got {cov.get('schema_version')!r}")
+    units = cov.get("units")
+    if not isinstance(units, list):
+        return errs + [f"{where}: units must be a list"]
+    known_classes = classes if classes is not None else threat_class_ids()
+    prev_units = {}
+    if isinstance(prev_cov, dict) and prev_cov.get("schema_version") == COVERAGE_VERSION:
+        prev_units = {u.get("id"): u for u in prev_cov.get("units") or [] if isinstance(u, dict)}
+    seen = set()
+    open_units = []                       # anything that keeps the run from complete
+
+    for i, unit in enumerate(units):
+        if not isinstance(unit, dict):
+            errs.append(f"{where}: units[{i}] is not an object")
+            continue
+        uid = unit.get("id")
+        at = f"{where}: unit {uid!r}"
+        refs = unit.get("refs") if isinstance(unit.get("refs"), dict) else {}
+        parts = [refs.get("surface"), refs.get("boundary")]
+        bad = [k for k, v in zip(("surface", "boundary"), parts)
+               if not isinstance(v, str) or not v or v != v.strip() or "::" in v
+               or any(ord(ch) < 32 for ch in v)]
+        if bad:
+            errs.append(f"{at}: refs.{'/'.join(bad)} must be a non-empty source reference "
+                        "without surrounding whitespace, control characters, or '::'")
+        elif uid != f"{parts[0]}::{parts[1]}":
+            errs.append(f"{at}: id must be refs.surface + '::' + refs.boundary "
+                        f"({parts[0]}::{parts[1]}) — ids derive from source, never from a label")
+        if uid in seen:
+            errs.append(f"{at}: duplicate unit id")
+        seen.add(uid)
+
+        status = unit.get("status")
+        origin = unit.get("prior")
+        checks = unit.get("checks")
+        reason = unit.get("reason")
+        if status not in UNIT_STATUSES:
+            errs.append(f"{at}: unknown status {status!r} (known: {sorted(UNIT_STATUSES)})")
+        if origin not in UNIT_ORIGINS:
+            errs.append(f"{at}: unknown prior {origin!r} (known: {sorted(UNIT_ORIGINS)})")
+        if not isinstance(checks, list):
+            errs.append(f"{at}: checks must be a list")
+            checks = []
+        assigned = unit.get("classes")
+        if not isinstance(assigned, list) or not assigned:
+            errs.append(f"{at}: classes must list the threat classes assigned to the unit")
+            assigned = []
+        for c in assigned:
+            if c not in known_classes:
+                errs.append(f"{at}: unknown threat class {c!r} (threat-classes.md / ai-and-llm.md ids)")
+
+        for j, chk in enumerate(checks):
+            cat = f"{at}: checks[{j}]"
+            if not isinstance(chk, dict):
+                errs.append(f"{cat} is not an object")
+                continue
+            for field in ("invariant", "result"):
+                if not chk.get(field):
+                    errs.append(f"{cat}: missing {field}")
+            if not isinstance(chk.get("paths"), list) or not chk.get("paths"):
+                errs.append(f"{cat}: paths must be a non-empty list")
+            if not AGENT_ID_RE.match(str(chk.get("who", ""))):
+                errs.append(f"{cat}: who must be the agent id that made the check "
+                            f"(lowercase [a-z0-9_-]), got {chk.get('who')!r}")
+            if chk.get("class") not in known_classes:
+                errs.append(f"{cat}: unknown threat class {chk.get('class')!r}")
+            if not RUN_ID_RE.match(str(chk.get("run_id", ""))):
+                errs.append(f"{cat}: run_id must name the run that made the check")
+            elif origin != "carried" and chk.get("run_id") != run_id:
+                errs.append(f"{cat}: made in run {chk.get('run_id')} — only a carried unit "
+                            "holds checks from an earlier run (stale evidence is re-scouted)")
+            if chk.get("run_id") == run_id and (not isinstance(chk.get("wave"), int)
+                                                or chk.get("wave") < 1):
+                errs.append(f"{cat}: wave must be a positive integer")
+
+        # the state table
+        has_reason = isinstance(reason, str) and bool(reason.strip())
+        if status == "planned":
+            if checks or has_reason:
+                errs.append(f"{at}: planned carries no checks and no reason")
+            if final:
+                errs.append(f"{at}: still planned in a snapshot — a unit the run did not "
+                            "scout is deferred with its reason")
+        elif status in ("covered", "candidate"):
+            if not checks:
+                errs.append(f"{at}: {status} requires checks — a unit is covered only by "
+                            "checks recorded on it")
+            if has_reason:
+                errs.append(f"{at}: {status} carries no reason")
+        elif status == "blocked":
+            if not has_reason:
+                errs.append(f"{at}: blocked requires a reason")
+            open_units.append(uid)
+        elif status == "deferred":
+            if not has_reason:
+                errs.append(f"{at}: deferred requires a reason (budget, max_waves, ...)")
+            if checks:
+                errs.append(f"{at}: deferred was never scouted, so it holds no checks")
+            open_units.append(uid)
+
+        unchecked = unit.get("unchecked", [])
+        if not isinstance(unchecked, list):
+            errs.append(f"{at}: unchecked must be a list")
+            unchecked = []
+        if status in ("covered", "candidate"):
+            checked = {c.get("class") for c in checks if isinstance(c, dict)}
+            listed = set()
+            for u in unchecked:
+                if not isinstance(u, dict) or not u.get("class") or not u.get("reason"):
+                    errs.append(f"{at}: unchecked entries are {{class, reason}}")
+                    continue
+                listed.add(u["class"])
+                if u["class"] in checked:
+                    errs.append(f"{at}: class {u['class']} has a check, yet is listed unchecked")
+            missing = [c for c in assigned if c not in checked and c not in listed]
+            if missing:
+                errs.append(f"{at}: assigned class(es) {', '.join(missing)} have no check and "
+                            "are not listed in unchecked — coverage per class is stated, "
+                            "never implied")
+            if listed:
+                open_units.append(uid)
+        elif unchecked:
+            errs.append(f"{at}: unchecked applies only to a covered or candidate unit")
+
+        # origin against the predecessor's coverage
+        base = prev_units.get(uid)
+        if prev_cov is not None and prev_units:
+            if origin == "new" and base is not None:
+                errs.append(f"{at}: prior is new, but the previous full snapshot has this unit")
+            if origin in ("carried", "changed", "expired", "reopened") and base is None:
+                errs.append(f"{at}: prior is {origin}, but the previous full snapshot "
+                            "has no such unit")
+        elif origin not in (None, "new") and origin in UNIT_ORIGINS:
+            errs.append(f"{at}: prior is {origin}, but there is no previous coverage to carry from")
+        if base is not None:
+            if origin == "carried":
+                if base.get("status") != "covered":
+                    errs.append(f"{at}: carried from a unit that was {base.get('status')!r} — "
+                                "only covered units carry")
+                prior_checks = base.get("checks") or []
+                head = checks[:len(prior_checks)]
+                if json.dumps(head, sort_keys=True) != json.dumps(prior_checks, sort_keys=True):
+                    errs.append(f"{at}: carried, but its checks do not start with the previous "
+                                "snapshot's checks verbatim")
+            if origin == "reopened" and base.get("status") == "covered":
+                errs.append(f"{at}: reopened, but it was covered — a covered unit is "
+                            "carried, changed, or expired")
+            if origin in ("changed", "expired") and base.get("status") != "covered":
+                errs.append(f"{at}: {origin}, but it was {base.get('status')!r} — "
+                            "a unit that was not covered is reopened")
+
+    retired = cov.get("retired", [])
+    if not isinstance(retired, list):
+        errs.append(f"{where}: retired must be a list")
+        retired = []
+    retired_ids = set()
+    for r in retired:
+        if not isinstance(r, dict) or not r.get("id") or not r.get("reason"):
+            errs.append(f"{where}: retired entries are {{id, reason}}")
+            continue
+        retired_ids.add(r["id"])
+        if r["id"] in seen:
+            errs.append(f"{where}: unit {r['id']!r} is both live and retired")
+    if prev_units:
+        for pid in sorted(set(prev_units) - seen - retired_ids, key=str):
+            errs.append(f"{where}: unit {pid!r} of the previous full snapshot is neither "
+                        "in units nor in retired — coverage never shrinks silently")
+
+    if final:
+        run_status = cov.get("status")
+        reasons = cov.get("incomplete_reasons", [])
+        if run_status not in RUN_STATUSES:
+            errs.append(f"{where}: status must be complete or incomplete, got {run_status!r}")
+        if not isinstance(reasons, list):
+            errs.append(f"{where}: incomplete_reasons must be a list")
+            reasons = []
+        gaps = cov.get("gaps") or []
+        if run_status == "complete":
+            if open_units:
+                errs.append(f"{where}: status complete, but unit(s) "
+                            f"{', '.join(map(str, open_units[:5]))} are deferred, blocked, or "
+                            "hold unchecked classes")
+            if gaps:
+                errs.append(f"{where}: status complete, but gaps lists {len(gaps)} open gap(s)")
+            if reasons:
+                errs.append(f"{where}: status complete carries no incomplete_reasons")
+        elif run_status == "incomplete" and not reasons:
+            errs.append(f"{where}: status incomplete requires incomplete_reasons")
+    return errs
+
+
+def load_prev_coverage(prev_path):
+    """The predecessor's coverage: the --prev run's own coverage.json, or —
+    for a recheck snapshot — its base full snapshot's. None when absent."""
+    if prev_path is None:
+        return None
+    run = Path(prev_path)
+    if not run.is_dir():
+        run = run.parent
+    try:
+        if (run / "coverage.json").is_file():
+            return json.loads((run / "coverage.json").read_text())
+        base = json.loads((run / "findings.json").read_text()).get("base_run")
+        if base and (run.parent / str(base) / "coverage.json").is_file():
+            return json.loads((run.parent / str(base) / "coverage.json").read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+    return None
+
+
+def validate_coverage(coverage_path: Path, data: dict, prev: dict = None,
+                      prev_cov: dict = None) -> list:
+    """The coverage claim (validate_units) plus degradation accounting: the
+    run's execution mode is recorded (and a linear run must name its
+    degraded phases), phases are known tokens, every listed finding id
+    resolves in this snapshot, the findings.json `degraded` flag is true
+    exactly when either degradation list is non-empty, and no in-context
+    verdict hides behind a missing `validated_in_context` flag."""
     errs = []
     try:
         cov = json.loads(coverage_path.read_text())
@@ -330,6 +581,10 @@ def validate_coverage(coverage_path: Path, data: dict, prev: dict = None) -> lis
         return [f"coverage.json: unreadable ({e})"]
     if not isinstance(cov, dict):
         return ["coverage.json: not an object"]
+    if cov.get("run_id") != data.get("run_id"):
+        errs.append(f"coverage.json: run_id {cov.get('run_id')!r} differs from "
+                    f"findings.json run_id {data.get('run_id')!r}")
+    errs += validate_units(cov, data.get("run_id"), final=True, prev_cov=prev_cov)
     execution = cov.get("execution")
     if execution not in EXECUTION_MODES:
         errs.append(f"coverage.json: execution must record how the run went — one of "
@@ -414,6 +669,7 @@ def validate_board(board_path: Path, data: dict, candidate_required=None,
     required = list(candidate_required or [])
     board_ids = set()
     severity_of = {}
+    unit_of = {}
     try:
         for line in board_path.read_text().splitlines():
             line = line.strip()
@@ -421,7 +677,11 @@ def validate_board(board_path: Path, data: dict, candidate_required=None,
                 continue
             rec = json.loads(line)
             cid = rec.get("id") or rec.get("local_id") or rec.get("candidate_id")
+            if cid and not BOARD_ID_RE.match(str(cid)):
+                errs.append(f"board candidate id {cid!r} is not C-NNNN — board ids come "
+                            "from one run-wide counter")
             if cid:
+                unit_of[str(cid)] = rec.get("unit")
                 if str(cid) in board_ids:
                     errs.append(f"board candidate id {cid} appears on more than one line — "
                                 "board ids are unique for the whole run")
@@ -443,12 +703,30 @@ def validate_board(board_path: Path, data: dict, candidate_required=None,
     if coverage_path is None:
         coverage_path = board_path.parent / "coverage.json"
     notes = []
+    units = None
     if coverage_path.is_file():
         try:
             cov = json.loads(coverage_path.read_text())
             notes = cov.get("hardening_notes", []) if isinstance(cov, dict) else []
+            units = cov.get("units") if isinstance(cov, dict) else None
         except (json.JSONDecodeError, OSError):
             notes = []                    # validate_coverage reports it
+    if isinstance(units, list):
+        # a unit is `candidate` exactly when the board holds a candidate of it
+        status_of = {u.get("id"): u.get("status") for u in units if isinstance(u, dict)}
+        with_candidates = set()
+        for cid, uid in sorted(unit_of.items()):
+            if uid not in status_of:
+                errs.append(f"board candidate {cid}: unit {uid!r} is not a coverage.json unit")
+            else:
+                with_candidates.add(uid)
+        for uid, st in status_of.items():
+            if st == "candidate" and uid not in with_candidates:
+                errs.append(f"coverage.json: unit {uid!r} is candidate, but the board holds "
+                            "no candidate of it")
+            if st in ("covered", "planned", "deferred", "blocked") and uid in with_candidates:
+                errs.append(f"coverage.json: unit {uid!r} is {st}, but the board holds "
+                            "candidates of it — its status is candidate")
     for note in notes if isinstance(notes, list) else []:
         routed = {str(c) for c in (note.get("candidates") or [])} if isinstance(note, dict) else set()
         buckets.update(routed)
@@ -501,23 +779,50 @@ def validate_prev(prev, data: dict) -> list:
     return errs
 
 
+USAGE = ("usage: validate_findings.py FINDINGS.json [--board candidates.jsonl] "
+         "[--prev RUN-DIR]\n       validate_findings.py --coverage COVERAGE.json")
+
+
+def validate_live_coverage(path: Path) -> list:
+    """Mid-run check of the live coverage file: the same unit rules as a
+    snapshot, except units may still be planned and the run status is not
+    decided yet. An invalid state must not drive the next wave."""
+    try:
+        cov = json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError) as e:
+        return [f"coverage: unreadable ({e})"]
+    if not isinstance(cov, dict):
+        return ["coverage: not an object"]
+    if not RUN_ID_RE.match(str(cov.get("run_id", ""))):
+        return [f"coverage: run_id must be <YYYY-MM-DD>-<n>, got {cov.get('run_id')!r}"]
+    return validate_units(cov, cov["run_id"], final=False)
+
+
 def main(argv):
     board = None
     prev = None
     rest = []
+    if len(argv) >= 2 and argv[1] == "--coverage":
+        if len(argv) != 3:
+            print(USAGE, file=sys.stderr)
+            return 2
+        errs = validate_live_coverage(Path(argv[2]))
+        for e in errs:
+            print(f"ERROR: {e}")
+        if not errs:
+            print("OK")
+        return 1 if errs else 0
     i = 1
     while i < len(argv):
         if argv[i] == "--board":
             if i + 1 >= len(argv):
-                print("usage: validate_findings.py PATH [--board candidates.jsonl] [--prev RUN-DIR]",
-                      file=sys.stderr)
+                print(USAGE, file=sys.stderr)
                 return 2
             board = Path(argv[i + 1])
             i += 2
         elif argv[i] == "--prev":
             if i + 1 >= len(argv):
-                print("usage: validate_findings.py PATH [--board candidates.jsonl] [--prev RUN-DIR]",
-                      file=sys.stderr)
+                print(USAGE, file=sys.stderr)
                 return 2
             prev = Path(argv[i + 1])
             i += 2
@@ -525,8 +830,7 @@ def main(argv):
             rest.append(argv[i])
             i += 1
     if len(rest) != 1:
-        print("usage: validate_findings.py PATH [--board candidates.jsonl] [--prev RUN-DIR]",
-              file=sys.stderr)
+        print(USAGE, file=sys.stderr)
         return 2
     path = Path(rest[0])
     errs = validate_schemas()
@@ -540,7 +844,7 @@ def main(argv):
         prev_data, prev_err = load_prev(prev)
         if prev_err:
             errs.append(prev_err)
-    errs += validate(data, path, prev_data)
+    errs += validate(data, path, prev_data, load_prev_coverage(prev))
     if board is not None:
         errs += validate_board(board, data, candidate_required_fields(),
                                path.parent / "coverage.json")

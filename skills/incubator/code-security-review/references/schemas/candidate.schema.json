@@ -20,11 +20,11 @@
   "properties": {
     "id": {
       "type": "string",
-      "description": "Board id, minted by the orchestrator (<unit>-c<N>); unique within the run's board."
+      "description": "Board id C-NNNN, minted by the orchestrator from one run-wide counter; unique within the run's board."
     },
     "unit": {
       "type": "string",
-      "description": "The coverage unit id (<surface>::<boundary>) the scout was assigned."
+      "description": "The coverage unit id (<surface ref>::<boundary ref>) the scout was assigned."
     },
     "path": {
       "type": "string",

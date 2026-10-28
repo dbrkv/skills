@@ -225,10 +225,13 @@ REPORT.md structure (file contract: `data-schema.md`):
    section: which phases and finding ids ran without isolation (from
    `coverage.json.degradation`) and why — the agent-launching tool was
    unavailable or verifiers failed — plus, per record, which verdicts are
-   `validated_in_context`; the coverage line ("X of Y units
-   checked, Z blocked, G open gaps"); and, when anything is uncovered or
-   blocked, an explicit "partial coverage" statement. A report without
-   coverage proof never calls the code clean.
+   `validated_in_context`; the run status (`coverage.json.status`:
+   complete / incomplete, with `incomplete_reasons`); the coverage line
+   ("X of Y units checked — C carried from <base run>, N scouted this run —
+   Z blocked, D deferred, U with unchecked classes, G open gaps"); and,
+   when the run is incomplete, an explicit "partial coverage" statement. A
+   report without coverage proof never calls the code clean, and carried
+   units are named as carried, never as checked this run.
 2. **Summary** — counts derived from the arrays, never hand-authored.
 3. **Rechecked findings** — the still_open / fixed / moved / cant_tell table.
 4. **Findings** — confirmed then likely, severity-descending: severity,
@@ -241,7 +244,8 @@ REPORT.md structure (file contract: `data-schema.md`):
    section is always present (state "none" when empty).
 7. **Hardening notes** — severity-free, clearly separate from findings.
 8. **Threat model diff** — quoted from `threat-model.md`.
-9. **Gaps** — from `coverage.json`.
+9. **Gaps** — from `coverage.json`: open gaps, deferred and blocked units
+   with their reasons, unchecked classes per unit, and retired units.
 
 **The reviewer.** One fresh agent checks the finished report against the
 code: every file, symbol, line range, and trace step in the report exists and

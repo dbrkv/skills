@@ -64,6 +64,53 @@ def head(repo: Path) -> str:
                           capture_output=True, text=True).stdout.strip()
 
 
+# Coverage units: ids derive from source refs (<surface ref>::<boundary ref>).
+U1 = "src/routes/users.js#usersRouter::principal:anonymous"
+U2 = "src/routes/admin.js#adminRouter::src/auth.js#requireAdmin"
+
+
+def check(run_id="2026-10-27-1", cls="INJ", who="scout-w1-g01", wave=1, **over):
+    base = {"who": who, "run_id": run_id, "wave": wave, "class": cls,
+            "paths": ["src/routes/users.js"], "invariant": "search param bound via placeholder",
+            "result": "bound via placeholder at line 45"}
+    base.update(over)
+    return base
+
+
+def unit_doc(uid=U1, status="covered", run_id="2026-10-27-1", prior="new",
+             classes=("INJ",), checks=None, **over):
+    surface, boundary = uid.split("::")
+    if checks is None:
+        checks = [] if status in ("planned", "deferred", "blocked") else \
+            [check(run_id, c) for c in classes]
+    base = {"id": uid, "label": uid.split("#")[-1], "refs": {"surface": surface, "boundary": boundary},
+            "paths": ["src/routes/"], "classes": list(classes), "prior": prior,
+            "status": status, "checks": checks,
+            "reason": "budget" if status in ("deferred", "blocked") else None}
+    base.update(over)
+    return base
+
+
+def coverage_doc(run_id="2026-10-27-1", units=None, execution="subagents", **over):
+    base = {"schema_version": 3, "run_id": run_id, "status": "complete",
+            "incomplete_reasons": [], "scope_exclusions": [],
+            "degradation": {"phases": [], "findings": []},
+            "units": units if units is not None else [unit_doc(run_id=run_id)],
+            "retired": [], "gaps": [], "hardening_notes": []}
+    if execution is not None:
+        base["execution"] = execution
+    base.update(over)
+    return base
+
+
+def write_coverage(run: Path, partial: dict, run_id: str = "2026-10-27-1") -> None:
+    """A valid v3 coverage.json with the test's fields laid over it; execution
+    is present only when the test supplies it."""
+    doc = coverage_doc(run_id=run_id, execution=None)
+    doc.update(partial)
+    (run / "coverage.json").write_text(json.dumps(doc))
+
+
 # A needs_review record no verifier produced: no verdict fields at all.
 UNVERIFIED = {"confidence": None, "reachability": None, "exploitability": None,
               "existing_mitigations": [], "exploitation_path": []}
@@ -131,8 +178,8 @@ def board_candidate(**over) -> dict:
     """A candidates.jsonl line: the candidate fields of
     candidate.schema.json plus the board id and unit."""
     base = {
-        "id": "u1-c1",
-        "unit": "http-public::unauthenticated",
+        "id": "C-0001",
+        "unit": U1,
         "path": "src/routes/users.js",
         "symbol": "usersRouter GET /users",
         "title": "SQL injection in user search",
@@ -297,14 +344,16 @@ class RunStoreTests(unittest.TestCase):
     def test_run_ordering_ten_after_two(self):
         repo = make_repo(self.base)
         with store_env(self.home, repo_id="o/r"):
-            self.write_run("o/r", "2026-10-27-2", snapshot_doc(run_id="2026-10-27-2"))
-            self.write_run("o/r", "2026-10-27-10", snapshot_doc(run_id="2026-10-27-10"))
+            # next-run-dir numbers within today's UTC date, so the runs are dated today
+            today = run_store.datetime.now(run_store.timezone.utc).strftime("%Y-%m-%d")
+            self.write_run("o/r", f"{today}-2", snapshot_doc(run_id=f"{today}-2"))
+            self.write_run("o/r", f"{today}-10", snapshot_doc(run_id=f"{today}-10"))
             import io
             buf = io.StringIO()
             with mock.patch("sys.stdout", buf):
                 run_store.cmd_latest_run(repo)
             out = json.loads(buf.getvalue())
-            self.assertIn("2026-10-27-10", out["latest"])
+            self.assertIn(f"{today}-10", out["latest"])
             with mock.patch("sys.stdout", buf):
                 run_store.cmd_next_run_dir(repo)
             self.assertTrue(str(buf.getvalue().strip()).endswith("-11"))
@@ -395,7 +444,7 @@ class RunStoreTests(unittest.TestCase):
             buf = io.StringIO()
             with mock.patch("sys.stdout", buf):
                 run_store.cmd_latest_run(repo)
-            self.assertEqual(json.loads(buf.getvalue()), {"latest": None, "latest_full": None})
+            self.assertEqual(json.loads(buf.getvalue()), {"latest": None, "latest_full": None, "in_progress": []})
 
             self.write_run("o/r", "2026-10-26-1", snapshot_doc())
             buf = io.StringIO()
@@ -452,6 +501,63 @@ class RunStoreTests(unittest.TestCase):
             with mock.patch("sys.stdout", buf), self.assertRaises(SystemExit):
                 run_store.cmd_trace_changed(repo, "F-9999")            # unknown id -> exit 1
 
+    def test_in_progress_run_is_not_a_snapshot(self):
+        repo = make_repo(self.base)
+        with store_env(self.home, repo_id="o/r"):
+            self.write_run("o/r", "2026-10-26-1", snapshot_doc(run_id="2026-10-26-1",
+                                                               findings=[finding()]))
+            live = self.write_run("o/r", "2026-10-27-1",
+                                  snapshot_doc(findings=[finding(id="F-0042")]))
+            (live / run_store.IN_PROGRESS).write_text("")
+            import io
+            buf = io.StringIO()
+            with mock.patch("sys.stdout", buf):
+                run_store.cmd_latest_run(repo)
+            out = json.loads(buf.getvalue())
+            self.assertIn("2026-10-26-1", out["latest"])          # the live run is skipped
+            self.assertEqual(out["in_progress"], [str(live)])
+            buf = io.StringIO()
+            with mock.patch("sys.stdout", buf):
+                run_store.cmd_next_id(repo)
+            self.assertEqual(buf.getvalue().strip(), "F-0002")    # its ids were never issued
+
+    def carry(self, repo):
+        import io
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            run_store.cmd_coverage_carry(repo)
+        return json.loads(buf.getvalue())
+
+    def test_coverage_carry_decisions(self):
+        repo = make_repo(self.base)
+        ref = head(repo)
+        today = run_store.datetime.now(run_store.timezone.utc).strftime("%Y-%m-%d")
+        rid = f"{today}-1"
+        fresh = lambda **o: check(rid, paths=["src/app.js"], **o)
+        units = [
+            unit_doc("src/app.js#app::principal:anonymous", run_id=rid, paths=["src/app.js"],
+                     checks=[fresh()]),
+            unit_doc("src/app.js#admin::src/app.js#auth", status="candidate", run_id=rid),
+            unit_doc("src/app.js#old::principal:anonymous", run_id=rid, paths=["src/app.js"],
+                     checks=[check("2026-01-01-1", paths=["src/app.js"])]),
+        ]
+        with store_env(self.home, repo_id="o/r"):
+            self.assertEqual(self.carry(repo)["units"], [])           # no full snapshot yet
+            run = self.write_run("o/r", rid, dict(snapshot_doc(run_id=rid), source_ref=ref))
+            (run / "coverage.json").write_text(json.dumps(coverage_doc(run_id=rid, units=units)))
+            got = {u["id"]: u["decision"] for u in self.carry(repo)["units"]}
+            self.assertEqual(got, {"src/app.js#app::principal:anonymous": "carried",
+                                   "src/app.js#admin::src/app.js#auth": "reopened",
+                                   "src/app.js#old::principal:anonymous": "expired"})
+            (repo / "src" / "app.js").write_text("changed\n")
+            got = {u["id"]: u["decision"] for u in self.carry(repo)["units"]}
+            self.assertEqual(got["src/app.js#app::principal:anonymous"], "changed")
+            # a pre-v3 base carries nothing: every unit is new
+            (run / "coverage.json").write_text(json.dumps({"units": units}))
+            out = self.carry(repo)
+            self.assertEqual(out["units"], [])
+            self.assertIn("schema_version 3", out["detail"])
+
 
 class ValidatorTests(unittest.TestCase):
     def setUp(self):
@@ -459,12 +565,14 @@ class ValidatorTests(unittest.TestCase):
         self.base = Path(self.tmp.name)
         self.addCleanup(self.tmp.cleanup)
 
-    def validate(self, doc, name="2026-10-27-1", kind_file=True, prev=None):
+    def validate(self, doc, name="2026-10-27-1", kind_file=True, prev=None, prev_cov=None):
         run = self.base / "runs" / name
         run.mkdir(parents=True, exist_ok=True)
         path = run / "findings.json"
         path.write_text(json.dumps(doc))
-        return validate_findings.validate(doc, path, prev)
+        if doc.get("kind") == "full" and not (run / "coverage.json").is_file():
+            (run / "coverage.json").write_text(json.dumps(coverage_doc(run_id=doc.get("run_id"))))
+        return validate_findings.validate(doc, path, prev, prev_cov)
 
     def test_valid_full(self):
         f1 = finding()
@@ -555,7 +663,8 @@ class ValidatorTests(unittest.TestCase):
                      **UNVERIFIED)
         self.assertEqual(self.validate(snapshot_doc(findings=[ok])), [])
         linear = finding(id="F-0012", status="needs_review", severity=None,
-                         reason_code="no_independent_verifier", missing_fact=None)
+                         reason_code="no_independent_verifier", missing_fact=None,
+                         verdict_date="2026-10-01")   # an earlier run's verdict: not this run's degradation
         self.assertEqual(self.validate(snapshot_doc(findings=[linear])), [])
         linear_fact = finding(id="F-0013", status="needs_review", severity=None,
                               reason_code="no_independent_verifier",
@@ -618,7 +727,7 @@ class ValidatorTests(unittest.TestCase):
 
         def with_coverage(coverage, doc):
             coverage.setdefault("execution", "subagents")
-            (run / "coverage.json").write_text(json.dumps(coverage))
+            write_coverage(run, coverage, doc["run_id"])
             return self.validate(doc)
 
         deg = {"phases": ["verification"], "findings": ["F-0001"]}
@@ -658,8 +767,7 @@ class ValidatorTests(unittest.TestCase):
         run.mkdir(parents=True, exist_ok=True)
 
         def with_coverage(deg, doc, prev=None):
-            (run / "coverage.json").write_text(
-                json.dumps({"execution": "subagents", "degradation": deg}))
+            write_coverage(run, {"execution": "subagents", "degradation": deg}, doc["run_id"])
             doc["degraded"] = bool(deg["phases"] or deg["findings"])
             return self.validate(doc, prev=prev)
 
@@ -705,8 +813,7 @@ class ValidatorTests(unittest.TestCase):
         run.mkdir(parents=True, exist_ok=True)
 
         def with_coverage(deg, doc):
-            (run / "coverage.json").write_text(
-                json.dumps({"execution": "workflow", "degradation": deg}))
+            write_coverage(run, {"execution": "workflow", "degradation": deg}, doc["run_id"])
             doc["degraded"] = bool(deg["phases"] or deg["findings"])
             return self.validate(doc)
 
@@ -730,18 +837,27 @@ class ValidatorTests(unittest.TestCase):
         self.assertEqual(with_coverage({"phases": [], "findings": []},
                                        snapshot_doc(findings=[capped])), [])
 
-    def test_no_coverage_file_skips_degradation_check(self):
-        # no sibling coverage.json (recheck snapshots): flag checks are skipped
-        doc = snapshot_doc()
-        doc["degraded"] = True
-        self.assertEqual(self.validate(doc), [])
+    def test_coverage_file_required_for_full_only(self):
+        # a full snapshot without coverage.json has no coverage claim at all
+        run = self.base / "runs" / "2026-10-28-1"
+        run.mkdir(parents=True)
+        path = run / "findings.json"
+        doc = snapshot_doc(run_id="2026-10-28-1")
+        path.write_text(json.dumps(doc))
+        errs = validate_findings.validate(doc, path)
+        self.assertTrue(any("requires a sibling coverage.json" in e for e in errs), errs)
+        # a recheck references its base's coverage: flag checks are skipped
+        self.validate(snapshot_doc(run_id="2026-10-26-1"), name="2026-10-26-1")
+        rc = snapshot_doc(kind="recheck", base_run="2026-10-26-1", run_id="2026-10-27-2")
+        rc["degraded"] = True
+        self.assertEqual(self.validate(rc, name="2026-10-27-2"), [])
 
     def test_coverage_execution_field(self):
         run = self.base / "runs" / "2026-10-27-1"
         run.mkdir(parents=True, exist_ok=True)
 
         def with_coverage(cov, doc):
-            (run / "coverage.json").write_text(json.dumps(cov))
+            write_coverage(run, cov, doc["run_id"])
             return self.validate(doc)
 
         empty_deg = {"phases": [], "findings": []}
@@ -775,7 +891,7 @@ class ValidatorTests(unittest.TestCase):
         run.mkdir(parents=True, exist_ok=True)
 
         def with_coverage(cov, doc):
-            (run / "coverage.json").write_text(json.dumps(cov))
+            write_coverage(run, cov, doc["run_id"])
             return self.validate(doc)
 
         # linear with an empty phase list hides the degradation
@@ -804,8 +920,7 @@ class ValidatorTests(unittest.TestCase):
         run.mkdir(parents=True, exist_ok=True)
 
         def with_coverage(deg, doc):
-            (run / "coverage.json").write_text(
-                json.dumps({"execution": "linear", "degradation": deg}))
+            write_coverage(run, {"execution": "linear", "degradation": deg}, doc["run_id"])
             doc["degraded"] = bool(deg["phases"] or deg["findings"])
             return self.validate(doc)
 
@@ -976,54 +1091,37 @@ class BoardAccountingTests(unittest.TestCase):
 
     def test_board_full_coverage(self):
         doc = snapshot_doc(
-            findings=[finding(merged_from=["u1-c1"])],
-            rej=[rejected(merged_from=["u2-c1"])],
-            suppressed=[{"id": "F-0002", "reason": "x", "candidates": ["u3-c1"]}])
-        board = self.write_board([
-            board_candidate(id="u1-c1"),
-            board_candidate(id="u2-c1", unit="http-auth::authenticated",
+            findings=[finding(merged_from=["C-0001"])],
+            rej=[rejected(merged_from=["C-0003"])],
+            suppressed=[{"id": "F-0002", "reason": "x", "candidates": ["C-0004"]}])
+        lines = ([
+            board_candidate(id="C-0001"),
+            board_candidate(id="C-0003", unit=U2,
                             path="src/config.js", title="Static secret",
                             root_cause_slug="static-secret",
                             severity_guess="medium"),
-            board_candidate(id="u3-c1", path="src/routes/admin.js",
+            board_candidate(id="C-0004", path="src/routes/admin.js",
                             title="Admin search SQL injection",
                             root_cause_slug="admin-sql-concat",
                             severity_guess="high"),
         ])
-        run = self.base / "runs" / "2026-10-27-1"
-        run.mkdir(parents=True)
-        path = run / "findings.json"
-        path.write_text(json.dumps(doc))
-        r = subprocess.run([PYTHON, str(Path(validate_findings.__file__)),
-                            str(path), "--board", str(board)], capture_output=True, text=True)
+        r = self.run_board(doc, lines)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
     def test_board_lost_candidate_fails(self):
-        doc = snapshot_doc(findings=[finding(merged_from=["u1-c1"])],
+        doc = snapshot_doc(findings=[finding(merged_from=["C-0001"])],
                            rej=[rejected()],   # F-0002 carries no merged_from
                            suppressed=[])
-        board = self.write_board([board_candidate(id="u1-c1"),
-                                  board_candidate(id="u2-c1")])   # u2-c1 vanishes
-        run = self.base / "runs" / "2026-10-27-1"
-        run.mkdir(parents=True)
-        path = run / "findings.json"
-        path.write_text(json.dumps(doc))
-        r = subprocess.run([PYTHON, str(Path(validate_findings.__file__)),
-                            str(path), "--board", str(board)], capture_output=True, text=True)
+        r = self.run_board(doc, [board_candidate(id="C-0001"),
+                                 board_candidate(id="C-0003")])   # C-0003 vanishes
         self.assertEqual(r.returncode, 1)
-        self.assertIn("u2-c1 is not accounted", r.stdout)
+        self.assertIn("C-0003 is not accounted", r.stdout)
 
     def test_board_line_must_satisfy_candidate_schema(self):
-        doc = snapshot_doc(findings=[finding(merged_from=["u1-c1", "u2-c1"])])
-        # u2-c1 is accounted for but misses fields required by candidate.schema.json
-        board = self.write_board([board_candidate(id="u1-c1"),
-                                  {"id": "u2-c1", "unit": "http-public::unauthenticated"}])
-        run = self.base / "runs" / "2026-10-27-1"
-        run.mkdir(parents=True)
-        path = run / "findings.json"
-        path.write_text(json.dumps(doc))
-        r = subprocess.run([PYTHON, str(Path(validate_findings.__file__)),
-                            str(path), "--board", str(board)], capture_output=True, text=True)
+        doc = snapshot_doc(findings=[finding(merged_from=["C-0001", "C-0003"])])
+        # C-0003 is accounted for but misses fields required by candidate.schema.json
+        r = self.run_board(doc, [board_candidate(id="C-0001"),
+                                 {"id": "C-0003", "unit": U1}])
         self.assertEqual(r.returncode, 1)
         self.assertIn("candidate.schema.json", r.stdout)
         self.assertIn("severity_guess", r.stdout)
@@ -1035,41 +1133,184 @@ class BoardAccountingTests(unittest.TestCase):
         run.mkdir(parents=True, exist_ok=True)
         path = run / "findings.json"
         path.write_text(json.dumps(doc))
-        if coverage is not None:
-            (run / "coverage.json").write_text(json.dumps(
-                dict({"execution": "workflow",
-                      "degradation": {"phases": [], "findings": []}}, **coverage)))
+        units = sorted({l.get("unit") for l in lines if l.get("unit")})
+        write_coverage(run, dict({"execution": "workflow",
+                                  "units": [unit_doc(u, status="candidate") for u in units]},
+                                 **(coverage or {})), doc["run_id"])
         return subprocess.run([PYTHON, str(Path(validate_findings.__file__)),
                                str(path), "--board", str(board)], capture_output=True, text=True)
 
     def test_board_duplicate_ids_fail(self):
-        doc = snapshot_doc(findings=[finding(merged_from=["u1-c1"])])
-        r = self.run_board(doc, [board_candidate(id="u1-c1"),
-                                 board_candidate(id="u1-c1", title="another defect")])
+        doc = snapshot_doc(findings=[finding(merged_from=["C-0001"])])
+        r = self.run_board(doc, [board_candidate(id="C-0001"),
+                                 board_candidate(id="C-0001", title="another defect")])
         self.assertEqual(r.returncode, 1)
         self.assertIn("more than one line", r.stdout)
 
     def test_board_hardening_note_is_a_bucket(self):
-        doc = snapshot_doc(findings=[finding(merged_from=["u1-c1"])])
+        doc = snapshot_doc(findings=[finding(merged_from=["C-0001"])])
         note = {"id": "H-001", "file": "src/server.js", "where": "listen()",
                 "note": "R9: TLS at the proxy", "recommendation": "confirm TLS",
-                "candidates": ["u1-c2"]}
-        lines = [board_candidate(id="u1-c1"),
-                 board_candidate(id="u1-c2", severity_guess="medium")]
+                "candidates": ["C-0002"]}
+        lines = [board_candidate(id="C-0001"),
+                 board_candidate(id="C-0002", severity_guess="medium")]
         r = self.run_board(doc, lines, {"hardening_notes": [note]})
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         # high/critical is never routed past the verifier
-        lines[1] = board_candidate(id="u1-c2", severity_guess="high")
+        lines[1] = board_candidate(id="C-0002", severity_guess="high")
         r = self.run_board(doc, lines, {"hardening_notes": [note]})
         self.assertEqual(r.returncode, 1)
         self.assertIn("never routed", r.stdout)
 
     def test_board_one_candidate_one_bucket(self):
-        doc = snapshot_doc(findings=[finding(merged_from=["u1-c1"])],
-                           rej=[rejected(merged_from=["u1-c1"])])
-        r = self.run_board(doc, [board_candidate(id="u1-c1")])
+        doc = snapshot_doc(findings=[finding(merged_from=["C-0001"])],
+                           rej=[rejected(merged_from=["C-0001"])])
+        r = self.run_board(doc, [board_candidate(id="C-0001")])
         self.assertEqual(r.returncode, 1)
         self.assertIn("one candidate, one bucket", r.stdout)
+
+
+class CoverageUnitTests(unittest.TestCase):
+    """coverage.json units: ids from refs, the state table, classes, carry."""
+
+    RUN = "2026-10-27-1"
+
+    def units_errs(self, units, final=True, prev_units=None, **over):
+        cov = coverage_doc(run_id=self.RUN, units=units, **over)
+        prev = None if prev_units is None else coverage_doc(run_id="2026-10-20-1", units=prev_units)
+        return validate_findings.validate_units(cov, self.RUN, final=final, prev_cov=prev)
+
+    def test_valid_units(self):
+        units = [unit_doc(),
+                 unit_doc(U2, status="deferred", reason="budget")]
+        self.assertEqual(self.units_errs(units, status="incomplete",
+                                         incomplete_reasons=["budget"]), [])
+
+    def test_id_derives_from_refs(self):
+        errs = self.units_errs([unit_doc(id="http-public::unauthenticated")])
+        self.assertTrue(any("id must be refs.surface" in e for e in errs), errs)
+        bad = unit_doc()
+        bad["refs"]["boundary"] = " principal:anonymous"
+        errs = self.units_errs([bad])
+        self.assertTrue(any("refs.boundary" in e for e in errs), errs)
+        errs = self.units_errs([unit_doc(), unit_doc()])
+        self.assertTrue(any("duplicate unit id" in e for e in errs), errs)
+
+    def test_state_table(self):
+        errs = self.units_errs([unit_doc(checks=[])])
+        self.assertTrue(any("covered requires checks" in e for e in errs), errs)
+        errs = self.units_errs([unit_doc(status="deferred", reason=None)],
+                               status="incomplete", incomplete_reasons=["budget"])
+        self.assertTrue(any("deferred requires a reason" in e for e in errs), errs)
+        errs = self.units_errs([unit_doc(status="deferred", checks=[check()])],
+                               status="incomplete", incomplete_reasons=["budget"])
+        self.assertTrue(any("holds no checks" in e for e in errs), errs)
+        errs = self.units_errs([unit_doc(status="blocked", reason=None)],
+                               status="incomplete", incomplete_reasons=["blocked"])
+        self.assertTrue(any("blocked requires a reason" in e for e in errs), errs)
+        planned = [unit_doc(status="planned", reason=None)]
+        errs = self.units_errs(planned)
+        self.assertTrue(any("still planned in a snapshot" in e for e in errs), errs)
+        self.assertEqual(self.units_errs(planned, final=False), [])   # fine mid-run
+        errs = self.units_errs([unit_doc(status="mostly-done")])
+        self.assertTrue(any("unknown status" in e for e in errs), errs)
+
+    def test_classes_are_checked_or_listed(self):
+        two = unit_doc(classes=["INJ", "AUTHZ-OBJ"], checks=[check()])
+        errs = self.units_errs([two])
+        self.assertTrue(any("AUTHZ-OBJ have no check" in e for e in errs), errs)
+        listed = unit_doc(classes=["INJ", "AUTHZ-OBJ"], checks=[check()],
+                          unchecked=[{"class": "AUTHZ-OBJ", "reason": "scout returned no check"}])
+        errs = self.units_errs([listed])                  # still claims complete
+        self.assertTrue(any("status complete" in e for e in errs), errs)
+        self.assertEqual(self.units_errs([listed], status="incomplete",
+                                         incomplete_reasons=["unchecked classes"]), [])
+        errs = self.units_errs([unit_doc(classes=["NOSUCH"], checks=[check(cls="NOSUCH")])])
+        self.assertTrue(any("unknown threat class 'NOSUCH'" in e for e in errs), errs)
+        ai = unit_doc(classes=["AI-TOOL"], checks=[check(cls="AI-TOOL")])
+        self.assertEqual(self.units_errs([ai]), [])
+
+    def test_check_provenance(self):
+        errs = self.units_errs([unit_doc(checks=[check(who="Scout 1")])])
+        self.assertTrue(any("who must be the agent id" in e for e in errs), errs)
+        stale = unit_doc(checks=[check(run_id="2026-10-20-1")])
+        errs = self.units_errs([stale])
+        self.assertTrue(any("only a carried unit" in e for e in errs), errs)
+
+    def test_run_status(self):
+        errs = self.units_errs([unit_doc()], gaps=[{"what": "x", "why": "y", "source": "critic"}])
+        self.assertTrue(any("gaps lists 1" in e for e in errs), errs)
+        errs = self.units_errs([unit_doc()], status="incomplete", incomplete_reasons=[])
+        self.assertTrue(any("requires incomplete_reasons" in e for e in errs), errs)
+        errs = self.units_errs([unit_doc()], status=None)
+        self.assertTrue(any("status must be complete or incomplete" in e for e in errs), errs)
+
+    def test_carry_against_previous_coverage(self):
+        prior = unit_doc(run_id="2026-10-20-1")
+        carried = unit_doc(prior="carried", checks=list(prior["checks"]))
+        self.assertEqual(self.units_errs([carried], prev_units=[prior]), [])
+        # a carried unit may gain this run's checks after the verbatim prefix
+        grown = unit_doc(prior="carried", checks=prior["checks"] + [check()])
+        self.assertEqual(self.units_errs([grown], prev_units=[prior]), [])
+        drift = unit_doc(prior="carried",
+                         checks=[dict(prior["checks"][0], result="reworded")])
+        errs = self.units_errs([drift], prev_units=[prior])
+        self.assertTrue(any("verbatim" in e for e in errs), errs)
+        was_candidate = dict(prior, status="candidate")
+        errs = self.units_errs([carried], prev_units=[was_candidate])
+        self.assertTrue(any("only covered units carry" in e for e in errs), errs)
+        errs = self.units_errs([unit_doc(prior="new")], prev_units=[prior])
+        self.assertTrue(any("prior is new" in e for e in errs), errs)
+        errs = self.units_errs([unit_doc(prior="changed")])
+        self.assertTrue(any("no previous coverage" in e for e in errs), errs)
+        self.assertEqual(self.units_errs([unit_doc(prior="changed")], prev_units=[prior]), [])
+        errs = self.units_errs([unit_doc(prior="reopened")], prev_units=[prior])
+        self.assertTrue(any("reopened, but it was covered" in e for e in errs), errs)
+
+    def test_coverage_never_shrinks_silently(self):
+        prior = [unit_doc(run_id="2026-10-20-1"), unit_doc(U2, run_id="2026-10-20-1")]
+        current = [unit_doc(prior="changed")]
+        errs = self.units_errs(current, prev_units=prior)
+        self.assertTrue(any("neither in units nor in retired" in e for e in errs), errs)
+        self.assertEqual(self.units_errs(current, prev_units=prior,
+                                         retired=[{"id": U2, "reason": "router removed"}]), [])
+
+    def test_board_links_candidate_units(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        run = Path(tmp.name)
+        board = run / "candidates.jsonl"
+        doc = snapshot_doc(findings=[finding(merged_from=["C-0001"])])
+
+        def errs(units, lines):
+            board.write_text("\n".join(json.dumps(l) for l in lines) + "\n")
+            write_coverage(run, {"execution": "subagents", "units": units})
+            return validate_findings.validate_board(board, doc, [], run / "coverage.json")
+
+        self.assertEqual(errs([unit_doc(status="candidate")], [board_candidate(id="C-0001")]), [])
+        e = errs([unit_doc(status="covered")], [board_candidate(id="C-0001")])
+        self.assertTrue(any("its status is candidate" in x for x in e), e)
+        e = errs([unit_doc(status="candidate"), unit_doc(U2, status="candidate")],
+                 [board_candidate(id="C-0001")])
+        self.assertTrue(any("holds no candidate of it" in x for x in e), e)
+        e = errs([unit_doc(U2)], [board_candidate(id="C-0001")])
+        self.assertTrue(any("is not a coverage.json unit" in x for x in e), e)
+        e = errs([unit_doc(status="candidate")], [board_candidate(id="u1-c1")])
+        self.assertTrue(any("is not C-NNNN" in x for x in e), e)
+
+    def test_live_coverage_cli(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        live = Path(tmp.name) / "coverage.json"
+        live.write_text(json.dumps(coverage_doc(
+            run_id=self.RUN, units=[unit_doc(), unit_doc(U2, status="planned", reason=None)])))
+        cmd = [PYTHON, str(Path(validate_findings.__file__)), "--coverage", str(live)]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        live.write_text(json.dumps(coverage_doc(run_id=self.RUN, units=[unit_doc(checks=[])])))
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("covered requires checks", r.stdout)
 
 
 class PrevCarryTests(unittest.TestCase):

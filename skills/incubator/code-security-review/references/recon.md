@@ -27,9 +27,25 @@ applies; everything here describes full mode unless said otherwise.
      needs_review) → the Phase 1 recheck list; rejected records (id,
      fingerprint, title, verdict_date, trace) → the Phase 1 rejected pass;
    - from the latest full snapshot: coverage gaps → scout-planning input;
-     the previous threat model → the diff base for Phase 1.
-5. **Plan.** Print 2–5 lines: scope, repo-id, snapshot used (or "first run"),
-   planned phases. Phase 0 writes nothing to disk.
+     the previous threat model → the diff base for Phase 1; its units →
+     the unit builder's base, with `python3 scripts/run_store.py
+     coverage-carry` deciding per unit whether its coverage carries
+     (`carried` / `changed` / `expired` / `reopened`, `data-schema.md` →
+     coverage.json). A base written before stable unit ids carries nothing:
+     every unit is new.
+5. **A run in progress.** `latest-run` also lists run directories still
+   in progress — a full run that stopped before its gate. When one exists
+   and its `work/run.json` matches this run's source_ref, dirty state, and
+   scope, resume it in place: saved valid responses are reused, never
+   re-requested (`data-schema.md`, The live run directory). Otherwise start
+   a new run and leave the old directory as it is — it is never a
+   snapshot.
+6. **Plan.** Print 2–5 lines: scope, repo-id, snapshot used (or "first
+   run"), the resumed run if any, units carried vs to scout, planned
+   phases. In quick mode Phase 0 writes nothing to disk. A full run
+   creates its run directory here — `next-run-dir`, then the
+   `.in-progress` marker and `work/run.json` — and nothing else; a recheck
+   creates its directory with the marker when it writes its snapshot.
 
 The storage root is `~/security-audit/` unless `SECURITY_AUDIT_HOME` is set
 (see `data-schema.md`); every script honors it.

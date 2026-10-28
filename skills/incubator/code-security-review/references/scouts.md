@@ -16,10 +16,29 @@ attack surface crossing one trust boundary:
 - one embedded-content or local-IPC surface, when present.
 
 A typical run has 6–12 units. Merge trivial units (a two-route file); split
-huge ones (a forty-route router, by subresource). Each unit gets: an `id`
-(`<surface>::<boundary>`), starting paths, the threat classes that plausibly
-apply (`threat-classes.md`), and recon notes (controls seen, model threats).
+huge ones (a forty-route router, by subresource). Each unit gets: source
+`refs` and the `id` derived from them (`<surface ref>::<boundary ref>`,
+`data-schema.md` → coverage.json), a human `label`, starting paths, the
+threat classes that plausibly apply (`classes`: ids from
+`threat-classes.md`, plus `ai-and-llm.md` ids when the unit processes
+model context or output), and recon notes (controls seen, model threats).
 For diff scopes, restrict units to the diff; a full audit covers the tree.
+The threat class is a dimension of the checks, not of the units: one unit
+carries several classes, and its coverage is proven per class by its
+checks.
+
+**Same source, same unit.** Unit ids are the coverage identity across runs,
+so the unit builder receives the previous full snapshot's units (id, refs,
+label, paths) with their `coverage-carry` decisions and reuses a previous
+unit's refs whenever it means the same source object — renaming the label
+is free, changing a ref mints a new unit and retires the old one. A
+previous unit whose surface no longer exists goes to `retired` with the
+reason; every other previous unit stays in the list. The parent then
+applies the carry decisions: a `carried` unit enters the run `covered`
+with its checks copied verbatim and costs no scout; `changed`, `expired`,
+and `reopened` units are `planned` like `new` ones. A carried unit is the
+evidence of an earlier run — the report names it as carried, never as
+checked this run.
 
 ## The hunting method: work from an invariant
 
@@ -60,23 +79,32 @@ receives, and only:
 
 A scout does not receive: other scouts' outputs, any verdict, or the hard
 exclusions — inclusion bias is the scout's job, filtering is the verifier's.
+Reference material travels as paths the scout reads itself, not as pasted
+text; its response is saved to `work/<agent-id>.json` (`data-schema.md`,
+The live run directory).
 
 **Scout response contract** (JSON only, no prose):
 `references/schemas/scout-result.schema.json` — `results[]` with one
 element per assigned unit (a scout with one unit returns one element), each
-holding `unit` (the unit id), `checks[]` — `{paths, invariant, result}` per
-check, the coverage evidence **for that unit only** — `candidates[]`,
+holding `unit` (the unit id), `checks[]` — `{class, paths, invariant,
+result}` per check, the coverage evidence **for that unit only**, at least
+one per assigned class (a class that does not apply is a check whose result
+says why) — `candidates[]`,
 `uncovered[]` — `{surface, boundary, paths, reason}` entries that become
 candidate units for the critic — and `hardening_notes[]`. Checks are never
 pooled across units: a unit counts as covered only by checks recorded on it,
-and a unit missing from `results` was not scouted (it stays planned). Each
+and a unit missing from `results` was not scouted (it stays planned). The
+parent stamps each check with the scout's agent id, the run id, and the
+wave, and lists an assigned class with no check in the unit's `unchecked`.
+Each
 element of `candidates[]` carries the candidate
 fields exactly as `references/schemas/candidate.schema.json` defines them
 (read the schema file and follow it; the schema is the contract, it is not
 restated here). The scout fills in its `unit` on every candidate; the
-orchestrator stamps the board `id` when appending the record to
-`candidates.jsonl` — and the board line must then satisfy the schema in
-full, which `scripts/validate_findings.py --board` checks.
+orchestrator stamps the board `id` (`C-NNNN`, one run-wide counter) when
+appending the record to `candidates.jsonl` — and the board line must then
+satisfy the schema in full, which `scripts/validate_findings.py --board`
+checks.
 
 `uncovered` entries become candidate units for the critic. An invalid
 response (unparseable, prose, missing arrays) is re-run once with a fresh
@@ -93,12 +121,16 @@ and in quick mode it stays an in-memory list — nothing is written.
 ## Phase 3 — Coverage critic
 
 One fresh agent after the scout wave (and after any follow-up wave). It
-receives the threat model, the coverage so far (units with their checks),
+receives the threat model, the live coverage (units with their checks,
+classes, unchecked classes, and origin — carried units included),
 candidate titles, and prior gaps. It asks:
 
-- which STRIDE categories have no check anywhere in the coverage?
+- which STRIDE categories and threat classes have no check anywhere in the
+  coverage?
 - which surfaces or boundaries from recon have no unit, or no check?
-- which units closed without checks?
+- which units closed without checks, or with unchecked classes?
+- which carried units sit next to changed code (a shared helper, a
+  changed caller) and deserve another pass?
 - which `uncovered` entries or prior gaps are still unaddressed?
 
 It returns `missing_units` (same shape as scout units) and `reassign` (unit

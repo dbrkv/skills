@@ -15,10 +15,16 @@ several matches are an error. A non-git directory hashes its path.
 Subcommands (--repo PATH is accepted before or after the subcommand):
 
     repo-id            print the repository id (store-root-relative)
-    latest-run         JSON: latest snapshot (any kind) + latest full snapshot
+    latest-run         JSON: latest snapshot (any kind) + latest full snapshot,
+                       plus run directories still in progress
     next-run-dir       print the next run directory path (not created)
     next-id [--count N]  the next N free F-NNNN ids (one line; default N=1)
     trace-changed ID   JSON: did the record's trace code change?
+    coverage-carry     JSON: per unit of the latest full snapshot, may its
+                       coverage be carried into this run?
+
+A run directory holding the IN_PROGRESS marker file is a live (or abandoned)
+run, never a snapshot: every lookup here skips it.
 
 Python 3.8+, stdlib only.
 """
@@ -40,6 +46,8 @@ CASE_INSENSITIVE_HOSTS = {"github.com", "gitlab.com", "bitbucket.org"}
 ID_RE = re.compile(r"^F-(\d+)$")
 RUN_NAME_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})-(\d+)$")
 HEX_REF_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
+IN_PROGRESS = ".in-progress"
+CARRY_TERM_DAYS = 90
 NAME_BAD_RE = re.compile(r"[^A-Za-z0-9._-]")
 
 
@@ -144,11 +152,22 @@ def read_kind(run: Path):
 
 
 def snapshot_runs(repo: Path) -> list:
+    """Issued snapshots only: a directory with findings.json and no
+    in-progress marker (a run that never passed its gate is not one)."""
     runs = runs_dir(repo)
     if not runs.is_dir():
         return []
-    candidates = [d for d in runs.iterdir() if d.is_dir() and (d / "findings.json").is_file()]
+    candidates = [d for d in runs.iterdir() if d.is_dir() and (d / "findings.json").is_file()
+                  and not (d / IN_PROGRESS).exists()]
     return sorted(candidates, key=run_sort_key)
+
+
+def in_progress_runs(repo: Path) -> list:
+    runs = runs_dir(repo)
+    if not runs.is_dir():
+        return []
+    return sorted((d for d in runs.iterdir() if d.is_dir() and (d / IN_PROGRESS).exists()),
+                  key=run_sort_key)
 
 
 def cmd_repo_id(repo: Path) -> None:
@@ -166,6 +185,7 @@ def cmd_latest_run(repo: Path) -> None:
     print(json.dumps({
         "latest": str(latest) if latest else None,
         "latest_full": str(latest_full) if latest_full else None,
+        "in_progress": [str(d) for d in in_progress_runs(repo)],
     }))
 
 
@@ -240,6 +260,80 @@ def cmd_trace_changed(repo: Path, finding_id: str) -> None:
     print(json.dumps(out))
 
 
+def run_date(run_id: str):
+    m = RUN_NAME_RE.match(str(run_id or ""))
+    if not m:
+        return None
+    try:
+        return datetime.strptime(m.group(1), "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def carry_decision(repo: Path, unit: dict, ref, today) -> tuple:
+    """(decision, detail) for one prior unit. Only a covered unit can be
+    carried, and only while its checks are under the term and no path it
+    was checked on has changed since the snapshot's source_ref. Every
+    uncertainty resolves to re-scouting — carry never fires on a guess."""
+    status = unit.get("status")
+    if status != "covered":
+        return "reopened", f"prior status {status!r}"
+    checks = [c for c in unit.get("checks") or [] if isinstance(c, dict)]
+    dates = [run_date(c.get("run_id")) for c in checks]
+    if not checks or None in dates:
+        return "expired", "a check without a dated run_id"
+    age = (today - min(dates)).days
+    if age >= CARRY_TERM_DAYS:
+        return "expired", f"oldest check is {age} days old (term {CARRY_TERM_DAYS})"
+    paths = sorted({p for p in list(unit.get("paths") or [])
+                    + [p for c in checks for p in c.get("paths") or []] if isinstance(p, str) and p})
+    if not is_git(repo):
+        return "changed", "not a git repository"
+    if not ref or not HEX_REF_RE.match(str(ref)):
+        return "changed", f"snapshot source_ref {ref!r} is not a commit hex"
+    ref = str(ref).lower()
+    if git(repo, "cat-file", "-e", f"{ref}^{{commit}}").returncode != 0:
+        return "changed", f"ref {ref} unavailable"
+    if not paths:
+        return "changed", "unit has no paths"
+    diff = git(repo, "diff", "--name-only", ref, "--", *paths)
+    st = git(repo, "status", "--porcelain", "--", *paths)
+    touched = [l for l in (diff.stdout + st.stdout).splitlines() if l.strip()]
+    if touched:
+        return "changed", f"changed since {ref}: " + ", ".join(touched[:5])
+    return "carried", f"checked paths unchanged since {ref}"
+
+
+def cmd_coverage_carry(repo: Path) -> None:
+    base = None
+    for d in reversed(snapshot_runs(repo)):
+        if read_kind(d) == "full":
+            base = d
+            break
+    if base is None:
+        print(json.dumps({"base": None, "units": [], "detail": "no full snapshot"}))
+        return
+    try:
+        cov = json.loads((base / "coverage.json").read_text())
+        ref = json.loads((base / "findings.json").read_text()).get("source_ref")
+    except (json.JSONDecodeError, OSError) as e:
+        print(json.dumps({"base": str(base), "units": [], "detail": f"unreadable: {e}"}))
+        return
+    if not isinstance(cov, dict) or cov.get("schema_version") != 3:
+        print(json.dumps({"base": str(base), "units": [],
+                          "detail": "base coverage predates stable unit ids (schema_version 3): "
+                                    "every unit is new"}))
+        return
+    today = datetime.now(timezone.utc).date()
+    out = []
+    for unit in cov.get("units") or []:
+        if not isinstance(unit, dict) or not unit.get("id"):
+            continue
+        decision, detail = carry_decision(repo, unit, ref, today)
+        out.append({"id": unit["id"], "decision": decision, "detail": detail})
+    print(json.dumps({"base": str(base), "source_ref": ref, "units": out}))
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="run_store.py",
                                 description="Run-store helpers for code-security-review.")
@@ -259,6 +353,7 @@ def build_parser() -> argparse.ArgumentParser:
                     help="how many sequential ids to issue (default 1)")
     tc = add("trace-changed")
     tc.add_argument("id", help="finding id, e.g. F-0012")
+    add("coverage-carry")
     return p
 
 
@@ -271,6 +366,7 @@ def main(argv=None) -> None:
         "next-run-dir": lambda: cmd_next_run_dir(repo),
         "next-id": lambda: cmd_next_id(repo, args.count),
         "trace-changed": lambda: cmd_trace_changed(repo, args.id),
+        "coverage-carry": lambda: cmd_coverage_carry(repo),
     }
     try:
         cmds[args.cmd]()

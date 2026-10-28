@@ -16,7 +16,7 @@ description: |
   Do NOT trigger to explain security concepts, write security documentation,
   or configure scanners or CI (gitleaks, semgrep, Snyk, Dependabot).
 metadata:
-  version: "2.3.0"
+  version: "3.0.0"
   user-invocable: "true"
 ---
 
@@ -79,9 +79,10 @@ way the run went.
 | recheck: many open findings (> 20) | propose workflow |
 
 Estimate before choosing: `3 (recon) + 1 (unit builder) + 1.3 × open
-findings (recheck, second verifiers included) + units (scouts — one per
-unit with subagents; a workflow groups up to 6 units per scout, so its own
-scout count is ⌈units / 6⌉ per wave) + 2 (critics) + 1 (consolidator) +
+findings (recheck, second verifiers included) + planned units (scouts — one
+per unit with subagents; a workflow groups up to 6 units per scout, so its
+own scout count is ⌈units / 6⌉ per wave; units carried from the previous
+full run cost nothing) + 2 (critics) + 1 (consolidator) +
 1.3 × min(20, candidates) (verifiers, second verifiers included) + 3
 (tail: review plus repair rounds — the findings.json assembly itself is
 deterministic code, not an agent call)`.
@@ -126,13 +127,16 @@ Rules:
 ~/security-audit/<repo-id>/runs/<YYYY-MM-DD>-<n>/
 ├── threat-model.md   # STRIDE model built this run + diff vs the previous run
 ├── findings.json     # verified findings + rejected records
-├── coverage.json     # scout coverage and known gaps
-└── REPORT.md         # human-readable report
+├── coverage.json     # coverage units (state per unit and class), gaps, run status
+├── REPORT.md         # human-readable report
+├── candidates.jsonl  # the candidate board (working artifact)
+├── work/             # every agent response + the live coverage (working artifact)
+└── .in-progress      # present until the snapshot is issued
 ```
 
 - `repo-id` — normalized `origin` URL (`github.com/owner/repo`: scheme, credentials, and `.git` stripped, host lowercased). Without a remote — `local/<hash8>-<name>`: first 8 hex of the root-commit sha256 plus the normalized repo folder name. The name is a readable signature set at creation; resolution is by hash (glob `local/<hash8>-*`), so renaming the repo folder keeps its history, and several hash matches are an error. A non-git directory hashes its path. Computed by `scripts/run_store.py repo-id`.
-- Run directory — next `<n>` for the date (`scripts/run_store.py next-run-dir`). Snapshots are immutable: a run never edits or deletes earlier snapshots; corrections land in the next run.
-- Memory between runs: the latest snapshot supplies open findings and rejected records; the latest **full** snapshot supplies coverage gaps and the previous threat model. Open findings (confirmed / likely / needs_review) are rechecked at every full run; a fix confirmed only on an uncommitted tree keeps the finding (`fixed_pending`) until a later run confirms it on a committed state (closed findings land in the snapshot's `fixed` array). Rejected records are carried verbatim until their trace changes or the 90-day term expires — either re-opens verification on the same id.
+- Run directory — next `<n>` for the date (`scripts/run_store.py next-run-dir`), created at the start of a full run with an `.in-progress` marker that is removed only when the snapshot is issued (the validator printed OK); a directory still holding it is never a snapshot. Every agent response is saved to `work/` as it returns, so a run that crashed resumes from them instead of starting over (`references/data-schema.md`, The live run directory). Snapshots are immutable: a run never edits or deletes earlier snapshots; corrections land in the next run.
+- Memory between runs: the latest snapshot supplies open findings and rejected records; the latest **full** snapshot supplies coverage gaps, the previous threat model, and its coverage units. Unit ids derive from source refs, so the same surface is the same unit in every run: a covered unit whose checked paths are unchanged and whose checks are under 90 days old is **carried** — covered without a scout (`scripts/run_store.py coverage-carry`); everything else is scouted again. Open findings (confirmed / likely / needs_review) are rechecked at every full run; a fix confirmed only on an uncommitted tree keeps the finding (`fixed_pending`) until a later run confirms it on a committed state (closed findings land in the snapshot's `fixed` array). Rejected records are carried verbatim until their trace changes or the 90-day term expires — either re-opens verification on the same id.
 
 ## Findings
 
@@ -146,15 +150,15 @@ Rules:
 
 | Phase | What happens | Reference |
 |-------|--------------|-----------|
-| 0 Preparation | Resolve scope, compute repo-id, read the latest snapshot (open findings, rejected records, gaps, previous threat model), print a short plan | `references/recon.md` |
+| 0 Preparation | Resolve scope, compute repo-id, read the latest snapshot (open findings, rejected records, gaps, previous threat model, coverage units + carry decisions), resume a matching run in progress or create the run directory, print a short plan | `references/recon.md` |
 | 1 Recon | 2–3 parallel agents map architecture, principals and controls, entry surfaces → a fresh STRIDE threat model + diff vs the previous one. In parallel: open findings from the last run are rechecked (still_open / fixed / fixed_pending / moved / cant_tell; a high/critical finding closes as fixed only when a second verifier agrees; in linear mode it never closes in-context), and rejected records are carried verbatim or re-verified per `trace-changed` and the 90-day term | `references/recon.md` |
-| 2 Scouts | One scout per surface × trust boundary hunts from invariants; candidates land on a JSONL board written only by the orchestrator. Each scout gets R1–R10, its threat classes, and the known-findings list (ids + titles only) | `references/scouts.md` |
+| 2 Scouts | One scout per planned unit (surface × trust boundary, id from source refs) hunts from invariants, with at least one check per assigned threat class; candidates land on a JSONL board written only by the orchestrator, and the live coverage is validated after every wave. Each scout gets R1–R10, its threat classes, and the known-findings list (ids + titles only) | `references/scouts.md` |
 | 3 Coverage critic | A fresh agent names what went unchecked by surface and STRIDE category → one bounded follow-up scout wave; what remains open lands in the gap list | `references/scouts.md` |
 | 4 Dedup | Candidates merge by root cause before verification: one shared-helper cause with several entry points is one finding | `references/scouts.md` |
 | 5 Verification | One isolated refute-first verifier per root cause, fresh context — starts only after Phase 3 (critic) and its follow-up wave have finished. A HIGH/CRITICAL candidate may be rejected only when a second independent verifier agrees; if the two disagree, the finding stays open (`likely` or `needs_review`) with `disputed: true` and both justifications | `references/verification.md` |
 | 6 Ranking | Severity from the impact anchors below | `references/verification.md` |
 | 7 Report | REPORT.md + one fresh reviewer checks the report against the code; it may correct details or downgrade with evidence, never upgrade | `references/verification.md` |
-| 8 Snapshot | Write threat-model.md, findings.json, coverage.json, REPORT.md into the run dir, then validate — it must print OK before the report is issued: `python3 scripts/validate_findings.py <run>/findings.json --board <run>/candidates.jsonl --prev <latest-run-dir>` (omit `--prev` on the first run — no snapshots yet). A validator error means the snapshot is not ready: fix and re-validate | `references/data-schema.md` |
+| 8 Snapshot | Write threat-model.md, findings.json, coverage.json, REPORT.md into the run dir, then validate — it must print OK before the report is issued: `python3 scripts/validate_findings.py <run>/findings.json --board <run>/candidates.jsonl --prev <latest-run-dir>` (omit `--prev` on the first run — no snapshots yet). A validator error means the snapshot is not ready: fix and re-validate. Only after the last OK does the run remove `.in-progress` | `references/data-schema.md` |
 
 When subagents are unavailable, every fan-out phase degrades to sequential
 passes in one context under the same contracts. Linear mode is allowed **only**
@@ -228,9 +232,9 @@ an unauthenticated injection that reads arbitrary tables anchors at critical
 - `references/schemas/*.json` — the shared schemas (candidate, scout result, verdict, recheck verdict, findings record): the single source for every agent contract and the board check
 - `references/trust-rules.md` — trust rules R1–R10, hard exclusions, precedents
 - `references/threat-classes.md` — the threat taxonomy: classes, control essence, CWE anchors
-- `references/data-schema.md` — snapshot layout, findings.json / coverage.json shapes, fingerprint format
+- `references/data-schema.md` — snapshot and live run layout, findings.json / coverage.json shapes (units, carry, state table), fingerprint format
 - `references/ai-and-llm.md` — hunting classes for LLM/agent code
-- `scripts/run_store.py`, `scripts/validate_findings.py` — repo-id / run dir / finding ids / trace-changed; findings.json validation
+- `scripts/run_store.py`, `scripts/validate_findings.py` — repo-id / run dir / runs in progress / finding ids / trace-changed / coverage-carry; snapshot and live-coverage validation
 
 ## Example invocations
 

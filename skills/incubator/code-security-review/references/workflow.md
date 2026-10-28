@@ -14,6 +14,14 @@ When this skill runs as a workflow, the orchestrator script is the parent:
 it holds the budget, applies every invariant below, and is the only writer
 of run files. Subagents are read-only analysts.
 
+**Files are the bus.** The run directory is live from Phase 0
+(`data-schema.md`, The live run directory): an `.in-progress` marker, and
+a `work/` folder where every agent response is saved the moment it
+returns, next to the live `work/coverage.json`. Agents receive paths, not
+pasted content; the parent reads responses back from `work/`, validates
+them, and only then uses them. A crash loses at most the calls in flight —
+a restart resumes from the saved responses.
+
 This file says **what the graph must do**, not how one API spells it. The
 code examples name primitives, not a required syntax. Translating the graph
 into a script is half the job; the other half is checking that script
@@ -56,13 +64,18 @@ Because the script cannot run the validator, the §5 gate and its repair
 loop run in the parent **after the workflow returns**: the script returns
 the assembled findings.json and coverage.json content, the parent writes
 them, validates, and launches the repair agent itself (a subagent) when
-the validator fails.
+the validator fails. A script that cannot write files cannot save
+responses to `work/` either: then each agent writes its own response file
+(the one path it is given, as with subagents), or the harness's own resume
+journal stands in for `work/` — the §9 header says which.
 
 ## 2. Nodes
 
 Every agent node gets: the read-only analyst persona (no file writes, no
-target execution, no network), and the schema file path that defines its
-response. "Receives" is exhaustive — anything not listed is not sent.
+target execution, no network — the one exception is its own response file
+in `work/` when the script cannot save it), its deterministic agent id, and
+the schema file path that defines its response. "Receives" is exhaustive —
+anything not listed is not sent, and large inputs are sent as paths.
 
 ### N1 · Recon (×2–3)
 
@@ -102,12 +115,20 @@ response. "Receives" is exhaustive — anything not listed is not sent.
   boundary), and draft the threat model in the same call.
 - **Receives.** All recon facts, the known-findings list (ids + fingerprints
   + titles), prior coverage gaps from the latest full snapshot, the previous
-  threat model's path (for the diff section), the unit rules
-  (`references/scouts.md`), the model template (`references/recon.md`,
-  Synthesis).
-- **Returns.** The unit list: `{id, paths, threat classes, recon notes}` —
-  the seed of `coverage.json.units` — and the threat-model markdown, which
-  the parent writes as `threat-model.md`. No separate model-writer node.
+  full snapshot's units (id, refs, label, paths) with their
+  `coverage-carry` decisions, the previous threat model's path (for the
+  diff section), the unit rules (`references/scouts.md`), the model
+  template (`references/recon.md`, Synthesis).
+- **Returns.** The unit list: `{refs, label, paths, classes, recon notes}`
+  — the seed of `coverage.json.units` — plus `retired[]` (previous units
+  whose surface is gone, with the reason), and the threat-model markdown,
+  which the parent writes as `threat-model.md`. No separate model-writer
+  node. The parent derives each id from its refs, sets `prior` from the
+  carry decisions (`new` for an id the base lacks), copies a carried unit's
+  checks verbatim, adds back any previous unit the builder neither kept
+  nor retired (its surface is not proven gone), writes
+  `work/coverage.json`, and runs `validate_findings.py --coverage` on it —
+  an invalid unit list goes back to the builder as its repair round.
 - **Instances.** 1, after the N1 barrier.
 - **Failure.** Invalid → one repair round; still failing → abort the run:
   units are the spine, nothing downstream can run (report says so; no
@@ -115,7 +136,9 @@ response. "Receives" is exhaustive — anything not listed is not sent.
 
 ### N4 · Scout (×1 per group of ≤6 units, per wave)
 
-- **Role.** Hunt candidates from invariants in its assigned units.
+- **Role.** Hunt candidates from invariants in its assigned units —
+  `planned` units only; a carried unit is scouted again only when a critic
+  reassigns it.
 - **Receives.** The group's unit definitions and starting paths; applicable
   threat-class entries (+ `ai-and-llm.md` blocks when relevant); trust rules
   R1–R10; the hunting method; the known-findings list (ids + fingerprints +
@@ -124,11 +147,14 @@ response. "Receives" is exhaustive — anything not listed is not sent.
   per unit — that unit's checks, `candidates[]` (fields per
   `candidate.schema.json`), `uncovered[]`, `hardening_notes[]`. The parent
   derives each unit's status from its own result: candidates → `candidate`,
-  checks only → `covered`, neither → `blocked`. Checks are never copied
-  across units of a group; a unit absent from the results stays planned.
-- **Board ids.** The parent mints `<unit>-c<N>` with one counter per unit
-  **for the whole run** — a unit re-scouted in a later wave continues its
-  numbering, never restarts it.
+  checks only → `covered`, neither → `blocked`; it stamps every check with
+  the scout's agent id, the run id, and the wave, and lists each assigned
+  class without a check under the unit's `unchecked`. Checks are never
+  copied across units of a group; a unit absent from the results stays
+  planned.
+- **Board ids.** The parent mints `C-NNNN` from **one run-wide counter** —
+  never per unit, never per wave; on a resume it continues from the
+  board's highest id.
 - **Re-scouting adds, never replaces.** A reassigned unit's new checks are
   appended to the ones it already has, and its status never drops below
   `candidate` while board candidates from an earlier wave belong to it.
@@ -143,8 +169,9 @@ response. "Receives" is exhaustive — anything not listed is not sent.
 ### N5 · Coverage critic (×1 per wave + 1 final)
 
 - **Role.** Name what went unchecked; propose coverage, not findings.
-- **Receives.** The threat model, the coverage so far (units with checks),
-  candidate titles, prior gaps.
+- **Receives.** The threat model, the path of the live `work/coverage.json`
+  (units with checks, classes, unchecked classes, origin), candidate
+  titles, prior gaps.
 - **Returns.** `missing_units[]` (unit seeds), `reassign[]` (unit ids +
   reasons), `stop` (its cleanliness verdict).
 - **Instances.** One after each scout wave (barrier on the wave), plus one
@@ -263,7 +290,8 @@ writer costs one call from the tail reserve (§4).
 ## 3. Edges and order
 
 ```
-parent prep (P5, no agents): repo-id · latest-run · next-run-dir · git rev-parse
+parent prep (P5, no agents): repo-id · latest-run (resume?) · next-run-dir ·
+   git rev-parse · coverage-carry · run dir + .in-progress + work/run.json
    │
    ├─ N1 recon A ∥ B ∥ [C]          ┐ pipelines, no barrier
    ├─ N2 recheck (per finding)      ┤ between them; N2 fires N8
@@ -273,14 +301,16 @@ parent prep (P5, no agents): repo-id · latest-run · next-run-dir · git rev-pa
    ▼ barrier
 N3 unit builder ──► units
    ▼
-┌─ wave loop (P4) ─────────────────────────────────────────────┐
-│ N4 scouts (groups of ≤6) ─► barrier ─► parent: board append   │
+┌─ wave loop (P4) ──────────────────────────────────────────────┐
+│ N4 scouts (groups of ≤6) ─► barrier ─► parent: board append,  │
+│   work/coverage.json + validate --coverage (an invalid state  │
+│   never drives the next wave)                                 │
 │   ▼                                                           │
 │ N5 critic ─► missing_units + reassign ─► next wave            │
 │ exits: no new units → clean path (final critic N5');          │
 │        wave > MAX_WAVES  → run marked incomplete;             │
 │        budget out        → run marked incomplete,             │
-│                              unassigned units → gaps          │
+│                              unassigned units → deferred      │
 └───────────────────────────────────────────────────────────────┘
    ▼ barrier
 N6 consolidator (dedup by root cause — BEFORE verification)
@@ -303,7 +333,8 @@ GATE: validate_findings.py (§5) ─► repair ≤2× (agent fixes
 parent: write threat-model.md + REPORT.md (execution mode in
         the header)
    ▼
-N10 reviewer ─► parent applies corrections ─► re-validate ─► issue
+N10 reviewer ─► parent applies corrections ─► re-validate ─► issue:
+        remove .in-progress (only now is the directory a snapshot)
 ```
 
 Barriers sit where a node needs the **whole** prior stage: unit building
@@ -314,10 +345,10 @@ second verifiers). The wave loop is the only cycle: scouts → critic →
 new/reassigned units → scouts.
 
 **Exits and honesty.** A run that ends because the wave limit or the budget
-stopped it is **incomplete**: `coverage.json.gaps` lists every unit never
-scouted (with the reason: `max_waves` / `budget`), REPORT.md says
-"incomplete run" in the header with the reason, and the conclusion names the
-count. Candidates the verifier cap left out become `needs_review` with
+stopped it is **incomplete**: every unit never scouted is `deferred` with
+its reason (`max_waves` / `budget`), `coverage.json.status` is
+`incomplete` with the reasons, REPORT.md says "incomplete run" in the
+header, and the conclusion names the count. Candidates the verifier cap left out become `needs_review` with
 `not_validated` — never silently dropped.
 
 ## 4. Budget
@@ -341,8 +372,11 @@ fan-out:
   call like the first attempt and draws from the same reserve as the call
   it repeats. `B` is a hard stop: a call that would exceed it is not made —
   the item it was for follows that node's failure rule.
+- **Carried units cost nothing**: the estimate and the scout allowance
+  count only `planned` units. **A resumed run keeps its spend**: every
+  response saved in `work/` counts against `B` once, reused or not.
 - **Scout allowance** per wave: `B − used − all reserves`; units beyond it
-  are deferred with reason `budget` (logged + coverage gaps), not dropped —
+  are deferred with reason `budget` (logged, unit status `deferred`), not dropped —
   and a deferred unit makes the run **incomplete**: coverage with deferred
   units is never clean.
 - **Verifier cap**: at most 20 verifiers per run, and never more than the
@@ -355,7 +389,8 @@ fan-out:
   to 20. Leftover root causes → `needs_review` / `not_validated` (a budget
   cut, reported — not degradation).
 - When a reserve would go negative, the run stops honestly: mark incomplete,
-  log the reason, remaining units → gaps.
+  log the reason, remaining planned units → `deferred` with reason
+  `budget`.
 
 ## 5. Gates
 
@@ -364,8 +399,8 @@ mode:
 
 1. N9 assembles the document deterministically, and the **parent** (P5 —
    script or main agent, never a subagent) writes **both** `findings.json`
-   and the sibling `coverage.json` (execution, degradation, gaps)
-   **before** the first validator run — the coverage checks (execution
+   and the sibling `coverage.json` (units, status, execution, degradation,
+   gaps) **before** the first validator run — the coverage checks (execution
    token, degradation accounting, a hidden `validated_in_context`) must
    sit inside the repair loop, not after it. Then run
    `python3 scripts/validate_findings.py <run>/findings.json --board
@@ -373,14 +408,18 @@ mode:
    first run).
 2. Not OK → errors on the findings side go to the N9 **repair agent**
    (fix record shape and the summary; verdicts untouched); errors on the
-   coverage side (execution, degradation lists) the parent fixes itself —
-   coverage.json is its file. Re-validate after each repair. **At most 2 repair
+   coverage side (execution, degradation lists, unit states, run status) the
+   parent fixes itself — coverage.json is its file — by re-deriving them
+   from the saved responses in `work/`, never by inventing a check. Re-validate after each repair. **At most 2 repair
    attempts** — 3 validator runs in all; the last one decides.
 3. Still not OK → the snapshot is **not ready**: no OK, no issued report.
    REPORT.md (or the chat answer) says so directly, quoting the remaining
-   validator errors, and nothing is claimed as a saved snapshot.
+   validator errors, and nothing is claimed as a saved snapshot. The
+   `.in-progress` marker stays, so no later run mistakes the directory for
+   a snapshot.
 4. After N10's corrections the parent re-runs the validator once more; a
-   correction that breaks the gate goes back to N9.
+   correction that breaks the gate goes back to N9. Only when that last
+   run prints OK does the parent remove `.in-progress` — the issue step.
 
 The validator also checks the schema files themselves
 (`references/data-schema.md`, Validation) — a drifted
@@ -389,7 +428,8 @@ schema fails the run before any findings do.
 ## 6. Instruments
 
 If the harness has a board/dashboard (P7), show: **units by status**
-(planned / in_progress / covered / candidate / blocked / deferred), a
+(planned / covered / candidate / blocked / deferred, carried counted
+apart), a
 **candidates table** (board id, title, verdict, severity) updated as
 verdicts land, and **budget counters** (used / B, reserve left, verifiers
 left). If it has none, the same three lines go to `log()` after every wave
@@ -402,8 +442,10 @@ before launching the run (the procedure is §9):
 
 1. **Files are written only by the parent.** Agents read; the parent (script
    via P5, or the main agent around the workflow) is the sole writer of
-   `candidates.jsonl`, findings.json, coverage.json, REPORT.md,
-   threat-model.md. Scouts never write the board.
+   `candidates.jsonl`, `work/coverage.json`, `work/run.json`,
+   findings.json, coverage.json, REPORT.md, threat-model.md. Scouts never
+   write the board. The one file an agent may write is its own response
+   in `work/`, and only when the script cannot save it.
 2. **Dedup before verification.** N6 (root-cause merge) and snapshot
    matching complete before any N7 verifier starts — one root cause, one
    verifier, one id.
@@ -414,7 +456,8 @@ before launching the run (the procedure is §9):
    change them.
 5. **Nothing is dropped silently.** Every cut — deferred units, capped
    verifications, dropped invalid responses — lands in the log **and** in
-   `coverage.json` (gaps, `not_validated`, blocked reasons).
+   `coverage.json` (gaps, deferred and blocked reasons, unchecked classes)
+   or findings.json (`not_validated`).
 6. **A failed or empty agent response is a degradation, not a skip** — and
    never a crash: every agent call, the repair, writer, and reviewer calls
    included, has a failure path (a failed repair is a spent round; an
@@ -443,14 +486,30 @@ before launching the run (the procedure is §9):
     coverage.json after the validator printed OK, both are regenerated
     together and the validator runs again — the `degraded` flag and the
     degradation lists must still agree.
+11. **Every response is saved before it is used.** Each agent call's
+    result lands in `work/<agent-id>.json` under its deterministic id
+    before the parent acts on it; the parent acts on what it reads back,
+    validated. On a resume, a saved valid response replaces the call.
+12. **Coverage is validated while it is built.** After the unit builder and
+    after every wave, `work/coverage.json` passes `validate_findings.py
+    --coverage` before the next wave is planned; carried units keep their
+    checks verbatim; a unit leaves the run only through `retired`.
+13. **A directory is a snapshot only when issued.** `.in-progress` is
+    created with the run directory and removed only after the last
+    validator run printed OK.
 
 ## 8. Pseudocode
 
 ```
 run audit (BUDGET = ceil(1.2 × estimate), MAX_WAVES=3):
   used = 0; wave = 0; incomplete = none
-  parent: repo-id, latest-run, next-run-dir, source_ref        # P5, no agents
+  parent: repo-id, latest-run, source_ref                      # P5, no agents
+  run = resumable in_progress run (run.json matches) or next-run-dir
+        + .in-progress + work/run.json                         # new run
+  call(id, ...) = saved valid work/<id>.json, else agent(...) saved to it
+                                                               # every call below
   open, rejected = open findings + rejected records of latest snapshot
+  carry = coverage-carry                                       # per prior unit
 
   facts  = barrier [ agent(recon A), agent(recon B), agent(recon C)? ]   # P1,P2
   rechecks = pipeline open as f:                               # N2
@@ -463,24 +522,31 @@ run audit (BUDGET = ceil(1.2 × estimate), MAX_WAVES=3):
                 trace-changed(r)? unchanged&fresh -> keep verbatim
                 else -> recheck pipeline on the same id
 
-  units = agent(unit-builder, facts + known + prior gaps)      # N3
+  units = agent(unit-builder, facts + known + prior gaps + prior units & carry)  # N3
+  parent: ids from refs; prior from carry; carried -> covered, checks verbatim;
+          write work/coverage.json; validate --coverage (repair once, else abort)
   while units has status planned and incomplete is none:
     if wave >= MAX_WAVES: incomplete = "max_waves"; break
     reserve = 2 critics + 3 tail + max(4, ceil(0.3*(BUDGET-used)))       # §4
     if used + reserve >= BUDGET: incomplete = "budget"; break
     wave += 1
     allowance = BUDGET - used - reserve
-    groups = chunk(units.planned, 6)[:allowance]               # the rest deferred "budget" -> gaps
+    groups = chunk(sorted(units.planned), 6)[:allowance]       # the rest deferred "budget"
     if some groups deferred: incomplete = "budget"             # still scout the admitted ones
     results = barrier [ agent(scout(g)) for g in groups ]      # all launched at once; scout-result schema
-    parent: per unit result -> that unit's checks + status; board ids from the run-wide counter
-            append valid candidates to candidates.jsonl; invalid response -> one retry, then blocked
+    parent: per unit result -> that unit's checks (stamped who/run/wave) + status + unchecked
+            board ids C-NNNN from the run-wide counter; append valid candidates to candidates.jsonl
+            invalid response -> one retry, then blocked
+            write work/coverage.json; validate --coverage before planning the next wave
     critic = agent(critic, coverage + threat model + titles)   # fresh every wave
     units += critic.missing_units (new ids only); requeue critic.reassign
     if nothing planned and critic.proposed nothing and incomplete is none:
       final = agent(final-critic, coverage)                    # second opinion
       if final.proposed nothing: coverage_clean = true; break  # stop:true alone is not clean
       units += final.missing_units; requeue final.reassign
+
+  parent: units still planned -> deferred (reason: max_waves / budget)
+          status = complete only if no deferred/blocked/unchecked unit and no gap
 
   merges, routes = agent(consolidator, board candidates)       # N6 barrier, before verification
   parent: apply merges (merged_from); apply routes only for medium/low -> hardening notes
@@ -502,7 +568,7 @@ run audit (BUDGET = ceil(1.2 × estimate), MAX_WAVES=3):
   queue[cap:] -> needs_review "not_validated"                  # logged, report lists them
 
   doc = parent: assemble findings.json (merges, verbatim rejected, counted summary)  # N9
-  parent: write findings.json + coverage.json (execution:"workflow", degradation, gaps)
+  parent: write findings.json + coverage.json (execution:"workflow", status, degradation, gaps)
           BEFORE the first validator run                       # coverage checks sit in the repair loop
   # §5 gate — no exec in the script (Claude Code)? this block runs in the
   # parent after the workflow returns, the repair agent as a subagent
@@ -514,7 +580,8 @@ run audit (BUDGET = ceil(1.2 × estimate), MAX_WAVES=3):
   if not ok: report "snapshot not ready" with errors; stop     # no OK, no report
   parent: write threat-model.md + REPORT.md (header: execution mode)
   fixes = agent(reviewer, REPORT + findings)                   # N10, downgrade-only
-  parent: apply fixes; rewrite findings.json + coverage.json together; re-validate; issue report
+  parent: apply fixes; rewrite findings.json + coverage.json together; re-validate
+  parent: OK -> remove .in-progress; issue report         # only now a snapshot
   return conclusion(complete/incomplete + reason, counts, budget spent)
 ```
 
@@ -552,10 +619,14 @@ for the conservative case.
 5. **Determinism and resume.** Are the clock and randomness available? Does
    the harness resume or cache calls on re-run? Take dates and the run id
    from a command or the input arguments, never from a call that breaks
-   resume.
+   resume. Resume is designed into the run (`work/` and deterministic agent
+   ids, §7.11) — check that the script derives every agent id from the
+   node and its item, groups planned units in sorted order, and reads a
+   saved response before making a call; if the harness has its own resume,
+   say how the two fit together.
 6. **Processes and files.** Can the script run commands and write files
-   (P5)? From which working directory do commands and agents resolve
-   relative paths? Use absolute paths for the skill directory, the
+   (P5)? If it cannot write, who saves responses to `work/` (§1)? From
+   which working directory do commands and agents resolve relative paths? Use absolute paths for the skill directory, the
    repository, and the run directory; confirm agents can read the skill's
    `references/` from where they run.
 7. **Read-only agents.** Can the harness restrict an agent's tools (no

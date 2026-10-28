@@ -16,7 +16,8 @@
         "findings.json contains a confirmed CWE-79 finding in src/routes/notes.js",
         "REPORT.md is non-empty and its header states coverage",
         "threat-model.md exists and covers the six STRIDE categories",
-        "Deployment-control candidates (NODE_ENV, host permissions, backups, stack traces) appear as hardening notes in coverage.json, not as needs_review findings"
+        "Deployment-control candidates (NODE_ENV, host permissions, backups, stack traces) appear as hardening notes in coverage.json, not as needs_review findings",
+        "coverage.json has schema_version 3, every unit id equals refs.surface + '::' + refs.boundary, every check names its threat class, and the run directory holds work/ with the agents' responses but no .in-progress marker"
       ]
     },
     {

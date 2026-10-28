@@ -4,7 +4,7 @@ The shapes of everything the skill writes. `scripts/validate_findings.py`
 checks `findings.json` against this contract; `scripts/run_store.py`
 implements the storage rules. The agent-facing response and record schemas
 live as JSON Schema in `references/schemas/` — candidate (the board record),
-verdict, recheck verdict, findings record — and are the single source for
+scout result, verdict, recheck verdict, findings record — and are the single source for
 those shapes: prompts point agents at the files, the workflow graph returns
 them, and the validator cross-checks them on every run. Where a shape is
 defined in a schema file, this document does not repeat it.
@@ -37,6 +37,57 @@ defined in a schema file, this document does not repeat it.
   tree (committed diff, staged changes, and untracked files under those
   paths). An unavailable ref (rebase, squash) or a non-git directory
   resolves to `changed` — fail-open: suppression never fires on uncertainty.
+- `coverage-carry`: reads the units of the latest full snapshot and decides,
+  per unit, whether its coverage may be carried into this run (rules in
+  coverage.json below). Fail-open the same way: any uncertainty resolves to
+  re-scouting.
+
+## The live run directory
+
+A run directory exists from the start of the run, not only at its end:
+
+```
+runs/<YYYY-MM-DD>-<n>/
+├── .in-progress        # marker: this directory is not a snapshot yet
+├── work/               # the run's file bus (below)
+│   ├── run.json        # source_ref, dirty, scope, execution, budget B, ids issued
+│   ├── coverage.json   # the live coverage, rewritten after every wave
+│   └── <agent-id>.json # each agent's raw response, one file per call
+├── candidates.jsonl    # the board, appended as scouts return
+└── … the snapshot files, written at the gate
+```
+
+- **`.in-progress`** is created with the directory — by a full run and a
+  recheck alike — and removed only when the snapshot is issued (the final
+  validator run printed OK). A directory
+  holding it is never a snapshot: `latest-run`, `next-id`, `trace-changed`,
+  and `coverage-carry` skip it, and `latest-run` lists it under
+  `in_progress`. A run whose gate never passed stays in progress forever —
+  it never becomes the base of a later run.
+- **`work/<agent-id>.json`** holds one agent call's response, saved the
+  moment the call returns, valid or not. Agent ids are deterministic —
+  derived from the node and its item, never from a counter that depends on
+  timing: `recon-a`, `recheck-f-0012`, `recheck2-f-0012` (the blind second
+  verifier), `unit-builder`, `scout-w1-g01` (wave 1, group 1 of the sorted
+  planned units), `critic-w1`, `critic-final`, `consolidator`,
+  `verify-f-0007`, `verify2-f-0007`, `repair-1`, `writer`, `reviewer`; a
+  retry appends `-retry`. Lowercase `[a-z0-9_-]`, at most 64 characters.
+  Who writes the file: the script, in a workflow; the agent itself, with
+  subagents — the one path it was given, the only write an agent is ever
+  allowed. Either way the parent reads the file back and validates it
+  before using it; agents never write anything else.
+- **Resume.** When a run stops before its gate (a crash, a killed session),
+  the next invocation finds it under `in_progress`. If `work/run.json`
+  matches the current source_ref, dirty state, and scope, the run resumes
+  in place: every call whose response file exists and is valid is not made
+  again, and its cost stays counted against `B` (the budget is per run, not
+  per attempt). The ids issued by `next-id` are recorded in
+  `work/run.json` and reused, never re-requested. A mismatch starts a new
+  run; the old directory stays in progress, never a snapshot.
+- Agents receive **paths**, not contents: the skill references, the
+  threat model, the live coverage, a candidate's bundle. Scripts take paths
+  too. This keeps prompts and command arguments small (a harness payload
+  limit never truncates a finding) and leaves a trail to debug from.
 
 ## Snapshot kinds
 
@@ -50,9 +101,9 @@ the base only for `coverage.json` and `threat-model.md`, which are
 referenced, not rewritten (verbatim-carry validation compares against the
 immediate predecessor of any kind). A recheck never chains onto another
 recheck. The next full snapshot supersedes everything before it.
-`candidates.jsonl` (the Phase 2–4 board) is a full-run working artifact
-written by the orchestrator: later runs never read it, and deleting it is
-safe.
+`candidates.jsonl` (the Phase 2–4 board) and `work/` are full-run working
+artifacts written by the orchestrator: later runs never read them, and
+deleting them from an issued snapshot is safe.
 
 ## findings.json
 
@@ -113,9 +164,10 @@ and is not duplicated here. The branches:
 - `id` (`F-NNNN`) is the primary key: unique within a snapshot, stable across
   snapshots for the same root cause. Id reuse comes from Phase 4 matching,
   never from recomputing a fingerprint.
-- Board ids (`<unit>-c<N>`) are unique for the whole run: the counter per
-  unit continues across waves, so a unit re-scouted in a later wave never
-  reuses an id.
+- Board ids (`C-NNNN`) come from one run-wide counter the parent keeps
+  across waves (and across a resume — it continues from the board's highest
+  id), so no id is ever reused within a run. The candidate's unit is its
+  `unit` field, not part of its id.
 - `merged_from[]` lists the `candidates.jsonl` board ids that deduped into
   this record (findings and rejected records). Accounting rule: every board
   candidate maps to exactly one bucket — a finding's or rejected record's
@@ -180,8 +232,11 @@ and is not duplicated here. The branches:
 
 ```json
 {
-  "run_id": "2026-10-27-1",
+  "schema_version": 3,
+  "run_id": "2026-10-28-1",
   "execution": "subagents",
+  "status": "incomplete",
+  "incomplete_reasons": ["budget: 1 unit deferred"],
   "scope_exclusions": [
     {"path": ".agents/", "reason": "agent/skill tooling, not the target's code"}
   ],
@@ -191,30 +246,111 @@ and is not duplicated here. The branches:
   },
   "units": [
     {
-      "id": "http-public::unauthenticated",
-      "paths": ["src/routes/"],
+      "id": "src/routes/users.js#usersRouter::principal:anonymous",
+      "label": "public users router",
+      "refs": {"surface": "src/routes/users.js#usersRouter", "boundary": "principal:anonymous"},
+      "paths": ["src/routes/users.js"],
+      "classes": ["INJ", "AUTHZ-OBJ"],
+      "prior": "carried",
       "status": "covered",
       "checks": [
-        {"who": "scout-1", "paths": ["src/routes/users.js"], "invariant": "search param bound via placeholder", "result": "string concat into SQL at line 45"}
+        {"who": "scout-w1-g01", "run_id": "2026-10-27-1", "wave": 1, "class": "INJ", "paths": ["src/routes/users.js"], "invariant": "search param bound via placeholder", "result": "bound at line 45"},
+        {"who": "scout-w1-g01", "run_id": "2026-10-27-1", "wave": 1, "class": "AUTHZ-OBJ", "paths": ["src/routes/users.js"], "invariant": "GET /users/:id scoped to the caller", "result": "owner check at line 61"}
       ],
+      "unchecked": [],
       "reason": null
+    },
+    {
+      "id": "src/worker.js#consume orders::src/queue.js#verifySignature",
+      "label": "orders queue consumer",
+      "refs": {"surface": "src/worker.js#consume orders", "boundary": "src/queue.js#verifySignature"},
+      "paths": ["src/worker.js", "src/queue.js"],
+      "classes": ["INTEGRITY", "INJ"],
+      "prior": "new",
+      "status": "deferred",
+      "checks": [],
+      "reason": "budget"
     }
+  ],
+  "retired": [
+    {"id": "src/routes/legacy.js#legacyRouter::principal:anonymous", "reason": "router removed in 4e1a9c2"}
   ],
   "gaps": [
     {"what": "queue consumer input unvalidated", "why": "critic: no unit covered src/worker", "source": "critic"}
   ],
   "hardening_notes": [
     {"id": "H-001", "file": "src/server.js", "where": "helmet config", "note": "no CSP", "recommendation": "add CSP"},
-    {"id": "H-002", "file": "src/server.js", "where": "listen()", "note": "R9: TLS terminates outside the repo", "recommendation": "confirm TLS at the proxy", "candidates": ["http-public::unauthenticated-c3"]}
+    {"id": "H-002", "file": "src/server.js", "where": "listen()", "note": "R9: TLS terminates outside the repo", "recommendation": "confirm TLS at the proxy", "candidates": ["C-0003"]}
   ]
 }
 ```
 
-Unit statuses: `covered` (non-empty checks), `candidate` (checks + linked
-findings), `blocked` (reason required), `deferred` (never scouted — the
-budget or the wave limit stopped the run; reason required, and the run is
-incomplete). Checks belong to the unit they were gathered for — a scout
-covering several units reports each unit's checks separately. Hardening notes live here — they are
+**Unit identity.** A unit's `id` is derived from source, never from a
+label: `refs.surface + "::" + refs.boundary`. `refs.surface` is the
+repo-relative path of the entry plus its identity in that file (a router, a
+route, a consumer, a CLI command, a shipped bundle); `refs.boundary` is the
+source control that defines the boundary (`src/auth.js#requireAdmin`) or,
+when no control exists in source, the principal it faces
+(`principal:anonymous`, `principal:authenticated`, `principal:device`). A
+ref has no surrounding whitespace, no control characters, and no `::`. The
+same source object gets the same ref in every run even when its `label`
+(free text, for people) changes — that stability is what lets coverage
+carry. Unit ids are unique within a file.
+
+**Origin (`prior`)** — where the unit came from, against the latest full
+snapshot's units:
+
+| prior | meaning | starts the run as |
+|---|---|---|
+| `new` | no unit with this id before (or no v3 base at all) | `planned` |
+| `carried` | was `covered`, its checks are under 90 days old, and no path it was checked on changed since that snapshot's `source_ref` | `covered`, checks copied verbatim |
+| `changed` | was `covered`, but a checked path changed (or the change could not be ruled out) | `planned` |
+| `expired` | was `covered`, but its oldest check is 90 days old or older | `planned` |
+| `reopened` | was `candidate`, `blocked`, or `deferred` | `planned` |
+
+`scripts/run_store.py coverage-carry` computes these decisions
+deterministically; the unit builder only names the units. A carried unit
+costs no scout; the critic may still reassign it, and the new checks are
+appended after the carried ones. A unit of the previous full snapshot that
+is not in `units` is in `retired` with a reason (its surface is gone) —
+coverage never shrinks silently.
+
+**Checks.** `{who, run_id, wave, class, paths, invariant, result}`: the
+agent id that made the check, the run and wave it was made in, the threat
+class it decides (an id from `threat-classes.md` or `ai-and-llm.md`), the
+paths read, the invariant, and the outcome. Checks belong to the unit they
+were gathered for — a scout covering several units reports each unit's
+checks separately. Only a carried unit holds checks from an earlier run;
+anywhere else an old check is stale evidence, and the unit is re-scouted
+instead.
+
+**Classes.** `classes` lists the threat classes assigned to the unit. Every
+assigned class of a covered or candidate unit has at least one check (a
+class that turns out not to apply is a check too — its result says why), or
+it is listed in `unchecked: [{class, reason}]`. Coverage per class is
+stated, never implied by a unit-level "covered".
+
+**Unit statuses** — the state table:
+
+| status | checks | reason | the run can be complete |
+|---|---|---|---|
+| `planned` | none | none | — live coverage only; never in a snapshot |
+| `covered` | at least one | none | yes, if no class is unchecked |
+| `candidate` | at least one, and the board holds a candidate of this unit | none | yes, if no class is unchecked |
+| `blocked` | any | required | no |
+| `deferred` | none (never scouted) | required (`budget`, `max_waves`, ...) | no |
+
+A unit is `candidate` exactly when the board holds a candidate whose `unit`
+is this unit — never otherwise. A unit the run did not scout ends the run as
+`deferred`, never `planned`.
+
+**Run status.** `status` is `complete` only when no unit is blocked or
+deferred, no unit has an unchecked class, and `gaps` is empty; otherwise it
+is `incomplete` with `incomplete_reasons` naming each cause (deferred units,
+the wave limit, a failed critic or recon agent, the reviewer unavailable).
+REPORT.md states it in the header.
+
+Hardening notes live here — they are
 not findings, carry no severity, and are counted nowhere in the findings
 summary. A candidate is either a hardening note or a verified record
 (finding / rejected), never both: the routing decision is made before
@@ -265,7 +401,35 @@ python3 scripts/validate_findings.py <run>/findings.json \
 # immediate predecessor of any kind: verbatim carry is checked on every
 # transition, not just against the full base
 python3 scripts/validate_findings.py <run>/findings.json --prev <latest-run-dir>
+
+# live coverage, mid-run — after the unit builder and after every wave;
+# an invalid coverage state must not drive the next wave
+python3 scripts/validate_findings.py --coverage <run>/work/coverage.json
 ```
+
+**Coverage checks.** A full snapshot must have its sibling `coverage.json`
+(`schema_version: 3`, the same `run_id`). The validator fails it when: a
+unit id is not `refs.surface::refs.boundary`, a ref is empty or malformed,
+or an id repeats; a status or `prior` token is unknown; a unit breaks the
+state table (covered/candidate without checks, blocked/deferred without a
+reason, deferred with checks, anything still `planned` in a snapshot); an
+assigned class or a check's class is not a heading id of
+`threat-classes.md` / `ai-and-llm.md`; an assigned class of a covered or
+candidate unit has neither a check nor an `unchecked` entry; a check lacks
+its agent id, run id, wave, paths, invariant, or result; a check from an
+earlier run sits on a unit that is not carried; `status` is complete while
+a unit is blocked, deferred, or has unchecked classes, or `gaps` is not
+empty, or `status` is incomplete without reasons. With `--prev`, against
+the predecessor's coverage (the `--prev` run's own, or its base full
+snapshot's for a recheck predecessor, when it is `schema_version` 3): a
+`new` unit must not exist there and any other origin must; a carried unit
+was covered there and its checks start with that unit's checks verbatim;
+`changed`/`expired` came from a covered unit and `reopened` from one that
+was not; and every unit there is either in `units` or in `retired`. With
+`--board`: board ids are `C-NNNN`, every board candidate's `unit` is a
+coverage unit, and a unit is `candidate` exactly when the board holds a
+candidate of it. `--coverage` runs the unit checks alone on a live file:
+`planned` is allowed there and the run status is not checked yet.
 
 The validator first checks the shared schemas themselves: every file in
 `references/schemas/` must be a valid JSON Schema object, the five expected
@@ -286,8 +450,8 @@ in-context); a fixed record lacks fingerprint, title, evidence, or
 medium or low; a recheck kind lacks a resolving `base_run` (it must point at
 a full snapshot); the summary counts disagree with the arrays (including
 `fixed` and `rechecked`); or `by_severity` does not sum to confirmed +
-likely. When a sibling `coverage.json` exists in the run directory (full
-snapshots), it also checks that `execution` is present and one of
+likely. In the sibling `coverage.json` (required for a full snapshot; a
+recheck has none), it also checks that `execution` is present and one of
 `workflow` / `subagents` / `linear`, and the degradation accounting:
 `phases` holds only the
 five known phase tokens, every id in `degradation.findings` resolves to a

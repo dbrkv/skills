@@ -8,7 +8,13 @@ licensed under the MIT License:
 - the invariant-based hunting method (`references/scouts.md`), adapted from
   its "Core hunting method" (`HUNTING.md`);
 - the AI and LLM hunting classes (`references/ai-and-llm.md`), adapted from
-  `AI-AND-LLM.md`, with verdict names changed to this skill's.
+  `AI-AND-LLM.md`, with verdict names changed to this skill's;
+- the coverage model of `coverage.json` (`references/data-schema.md`) —
+  unit ids derived from source references, carrying unchanged coverage
+  between runs, the per-status state table, and validating coverage after
+  every update — reimplemented after the ideas of its coverage ledger
+  (`RECONNAISSANCE.md`, `validate-coverage-ledger.cjs`); no code was
+  copied.
 
 The adapted material was rewritten for this skill's pipeline and terms; the
 original license follows.

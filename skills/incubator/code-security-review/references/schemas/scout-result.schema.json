@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "scout-result.schema.json",
   "title": "Scout result",
-  "description": "What one scout returns for its assigned units: one element per unit, so coverage evidence stays attached to the unit it was gathered for. A scout with one unit returns one element. The orchestrator derives each unit's status from its element (candidates -> candidate, checks only -> covered, neither -> blocked) and mints board ids; the scout never does. Read by scout prompts and the workflow graph.",
+  "description": "What one scout returns for its assigned units: one element per unit, so coverage evidence stays attached to the unit it was gathered for. A scout with one unit returns one element. The orchestrator derives each unit's status from its element (candidates -> candidate, checks only -> covered, neither -> blocked), stamps each check with the scout's agent id, the run id, and the wave, and mints board ids; the scout never does. Read by scout prompts and the workflow graph.",
   "type": "object",
   "required": ["results"],
   "properties": {
@@ -15,15 +15,16 @@
         "properties": {
           "unit": {
             "type": "string",
-            "description": "The assigned unit id (<surface>::<boundary>), exactly as given."
+            "description": "The assigned unit id (<surface ref>::<boundary ref>), exactly as given."
           },
           "checks": {
             "type": "array",
-            "description": "Coverage evidence for THIS unit only: one entry per invariant decided, either way.",
+            "description": "Coverage evidence for THIS unit only: one entry per invariant decided, either way. Every threat class assigned to the unit gets at least one check (a class that turns out not to apply is a check too: its result says why); the orchestrator lists an assigned class with no check as unchecked.",
             "items": {
               "type": "object",
-              "required": ["paths", "invariant", "result"],
+              "required": ["class", "paths", "invariant", "result"],
               "properties": {
+                "class": {"type": "string", "description": "The threat class id the check decides (threat-classes.md or ai-and-llm.md heading id, e.g. INJ, AUTHZ-OBJ, AI-TOOL)."},
                 "paths": {"type": "array", "items": {"type": "string"}},
                 "invariant": {"type": "string"},
                 "result": {"type": "string"}
