@@ -6,11 +6,11 @@ These rules decide what counts as exposed, what counts as attacker-controlled, a
 
 ## Trust rules
 
-- **T1. What ships to a client is public.** Browser bundles, mobile apps, and public configuration are readable by anyone, including build-time variables inlined into them (`NEXT_PUBLIC_*`, `VITE_*`, and similar). The precedent "environment variables are trusted" applies only to values that stay on the server.
+- **T1. What ships to a client is public.** Browser bundles, mobile apps, and public configuration are readable by anyone, including build-time variables inlined into them. The precedent "environment variables are trusted" applies only to values that stay on the server.
 - **T2. Client-side checks are not a control.** Hiding a button or validating in the browser is UX. Access to a server resource is checked where the resource lives, on every entry point that reaches it.
-- **T3. Framework protections cover only what goes through the framework.** Escaping, parameterization, CSRF tokens, and access rules protect the paths that use them. Code that bypasses the framework (raw SQL, `|raw` output, a route outside the access map) is unprotected until shown otherwise.
+- **T3. Framework protections cover only what goes through the framework.** Escaping, parameterization, CSRF tokens, and access rules protect the paths that use them. Code that bypasses the framework (raw queries, raw output, a route outside the access rules) is unprotected until shown otherwise.
 - **T4. Each implementation is checked on its own.** When one contract has several implementations (adapters, drivers, platforms), a control in one does not extend to the others.
-- **T5. Implicit coercion inside a security decision is suspicious.** Loose comparison, truthiness checks, and normalization before comparison (`==` in PHP or JavaScript, case folding, Unicode normalization) can make different values equal.
+- **T5. Implicit coercion inside a security decision is suspicious.** Loose comparison, truthiness checks, and normalization before comparison (loose equality, case folding, Unicode normalization) can make different values equal.
 - **T6. Controls outside the repository are unknown, not present.** Proxies, CDNs, WAFs, cloud policies, and platform settings are neither assumed to protect nor assumed to be missing. Reachability, though, follows from what the code serves: an HTTP server is reachable by network clients unless the repository proves otherwise (bound to localhost, a network policy in the repository) or the owner states it. A finding whose only deciding fact is such an external control (TLS termination, security headers, environment mode, disk encryption) is a hardening note in *Not checked*, not a finding.
 - **T7. Harm to oneself is not a finding.** A user damaging only their own data within their own rights does not cross a trust boundary.
 - **T8. Owner claims are assumptions.** "This is escaped elsewhere" or "that endpoint is internal" is checked in the code. If the code does not back it, the finding stays open and the report records the claim.
@@ -40,7 +40,7 @@ Trusted-by-default assumptions. When evidence shows one does not hold in a speci
 
 - Environment variables and command-line flags are trusted, on the server only (T1).
 - Random UUIDs (v4) are unguessable. Sequential IDs and time-based UUIDs are not.
-- React, Vue, Angular, and Twig auto-escape output, except `dangerouslySetInnerHTML`, `v-html`, `bypassSecurityTrust*`, and Twig `|raw` or autoescape turned off.
+- Template and UI frameworks that auto-escape output protect it, except where their raw-output escape hatch is used or escaping is turned off.
 - Client-side code does not need its own authorization checks; the server does (T2).
 - A user ID taken from a server-signed session or token is not attacker-controlled.
 - Notebook files are rarely exploitable.

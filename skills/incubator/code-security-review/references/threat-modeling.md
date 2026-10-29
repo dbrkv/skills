@@ -15,22 +15,22 @@ The model is a normal project document. It is written in plain language for the 
 
 ## Step 1: Understand the system
 
-1. **Stack.** Read the manifests (`composer.json`, `package.json`, `requirements.txt`, `go.mod`, `Cargo.toml`, ...) and note the languages, frameworks, and their versions.
-2. **Components.** Find the applications, services, and packages (`src/`, `apps/`, `services/`, `packages/`, `frontend/`, ...). Note databases, caches, queues, and background workers.
+1. **Stack.** Read the dependency manifests and note the languages, frameworks, and their versions.
+2. **Components.** Find the applications, services, clients, and packages. Note databases, caches, queues, background workers, and third-party SDKs embedded in clients.
 3. **Entry points.** HTTP routes and controllers, API handlers (REST, GraphQL, RPC), server actions, webhooks, file uploads, OAuth/SSO callbacks, CLI commands, queue consumers, scheduled jobs.
 4. **Data flows.** Where user input enters, where sensitive data is stored, which external services are called and with what credentials.
 5. **Existing documentation.** Architecture decision records, security guidelines, and agent instructions often state trust decisions the code alone does not show. Cite them; do not copy them.
 
 ## Step 2: Trust boundaries
 
-Describe the security zones and what validates every crossing between them. A typical web application has:
+Describe the security zones and what validates every crossing between them. A typical system has:
 
-1. **Public zone (untrusted).** Anonymous HTTP endpoints, uploaded files, anything shipped to the browser or a mobile client.
+1. **Public zone (untrusted).** Anonymous entry points, uploaded files, anything shipped to a client (browser, mobile app, desktop app), and other apps or processes on the same device that can call into a client.
 2. **Authenticated zone (partly trusted).** Endpoints that need a valid session or token. The user may still be malicious. Authorization is per resource, not per login.
 3. **Privileged zone.** Administrator and staff functions, internal tools.
 4. **Internal zone (trusted).** Service-to-service calls, databases, secret stores.
 
-For each boundary, name the code that enforces it (`file`, class, middleware, voter, guard).
+For each boundary, name the code that enforces it (file, class, middleware, guard).
 
 ## Step 3: Critical assets
 
