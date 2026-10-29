@@ -201,7 +201,7 @@
     {
       "id": 18,
       "name": "diff-review-staged",
-      "prompt": "Diff-review test. A fixture app is already prepared at <app>: a git repo whose baseline commit is clean and whose STAGED changes (git add, uncommitted) add src/routes/lookup.js with a SQL injection. The user says: \"scan my staged changes for security issues before I commit\". Save the final chat answer you would give the user to <outputs>/answer.md.",
+      "prompt": "A fixture app is already prepared at <app>: a git repo whose baseline commit is clean and whose STAGED changes (git add, uncommitted) add a single new file, src/routes/lookup.js. The user says: \"scan my staged changes for security issues before I commit\". Save the final chat answer you would give the user to <outputs>/answer.md.",
       "expected_output": "An in-chat answer naming the SQL injection in src/routes/lookup.js. The skill writes no files: no report and no threat model; it offers to create the threat model.",
       "files": [],
       "expectations": [
