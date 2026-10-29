@@ -1,6 +1,6 @@
 ---
 name: code-security-review
-version: 4.2.1
+version: 4.3.0
 description: |
   Review code for security vulnerabilities by reading the source: keep a STRIDE
   threat model of the repository in docs/security/, check the requested code

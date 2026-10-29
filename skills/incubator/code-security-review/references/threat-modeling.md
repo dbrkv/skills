@@ -37,6 +37,7 @@ For each boundary, name the code that enforces it (file, class, middleware, guar
 1. **Personal data**: names, emails, phone numbers, addresses, documents, messages, location.
 2. **Credentials and secrets**: password hashes, sessions, API keys, OAuth tokens, signing and encryption keys.
 3. **Business-critical data and actions**: payments, bookings, balances, permissions, anything that moves money or changes who can access what.
+4. **Promises the system makes to its users**: what a user is told others cannot see or do (visibility and privacy settings, blocking, account suspension, content rules). They are assets even when no money or secret is involved.
 
 Note where each is stored and which code guards it.
 
