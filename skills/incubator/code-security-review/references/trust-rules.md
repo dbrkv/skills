@@ -1,87 +1,46 @@
 # Trust rules, exclusions, precedents
 
-The trust rules shape both ends of the pipeline: scouts apply them for recall
-(what counts as exposed), verifiers apply them to verdicts. **On conflict, a
-rule wins over a precedent or a hard exclusion; a precedent survives only
-where no rule contradicts it.**
+These rules decide what counts as exposed, what counts as attacker-controlled, and which findings are noise. The scan uses them for recall; the validators use them for verdicts. Copy this file in full into every validator.
 
-## Trust rules R1–R10
+**Order of precedence:** the project's own security guidelines, then the trust rules below, then the hard exclusions and precedents. A precedent survives only where no rule above it contradicts it.
 
-- **R1.** Everything shipped to a client — web bundle, binary, application
-  package, public configuration — is public, including configuration values
-  and build-time variables. The "environment variables are trusted" precedent
-  applies only to values that stay on the server.
-- **R2.** Data on a device or in a client is an asset. Its protection is
-  determined by who else can read it (other applications, backups, the device
-  owner with elevated rights, third-party scripts on the page) — not by the
-  fact that "it's on the client".
-- **R3.** Client-side checks are not a control for server resources. Access
-  is verified where the resource lives.
-- **R4.** Untrusted content that has access to privileged host capabilities
-  (embedded web content, plugins, third-party scripts) is checked for origin
-  at every call, not once at load time.
-- **R5.** Entry points that other software on the same device or in the same
-  browser can call (inter-process calls, link and scheme handlers,
-  cross-window messaging) are treated as unauthenticated until the code proves
-  otherwise.
-- **R6.** Framework protections (escaping, parameterization, CSRF tokens)
-  apply only to paths that go through the framework. Code that bypasses the
-  framework is unprotected until proven otherwise.
-- **R7.** When one contract has multiple implementations (platforms, adapters,
-  drivers), each is checked separately; a control present in one does not
-  extend to the others.
-- **R8.** Comparisons that rely on implicit type coercion or normalization
-  inside a security decision are suspicious.
-- **R9.** Controls outside the repository (proxies, CDNs, cloud policies,
-  platform settings) are neither present nor absent. R9 governs *controls*,
-  never *exposure*: a service is reachable by the principals it is built for —
-  an HTTP server is built for network clients, a CLI for the users who run it.
-  "Internal-only" must be proven in the repository (bound to localhost, a
-  network policy in the repo) or stated by the owner (record it in
-  `owner_assumptions`); otherwise reachability follows from what the code
-  serves. A candidate whose only deciding fact is a control customarily
-  configured outside the repository (TLS termination, response headers,
-  NODE_ENV, umask, disk/backup encryption) becomes a hardening note, not a
-  finding; needs_review with a named R9 fact is reserved for a real code
-  defect whose exploitability hinges on exactly one such fact.
-- **R10.** Self-harm — a user damaging only themselves within their own
-  rights — is not a trust-boundary crossing and not a finding.
+## Trust rules
+
+- **T1. What ships to a client is public.** Browser bundles, mobile apps, and public configuration are readable by anyone, including build-time variables inlined into them. The precedent "environment variables are trusted" applies only to values that stay on the server.
+- **T2. Client-side checks are not a control.** Hiding a button or validating in the browser is UX. Access to a server resource is checked where the resource lives, on every entry point that reaches it.
+- **T3. Framework protections cover only what goes through the framework.** Escaping, parameterization, CSRF tokens, and access rules protect the paths that use them. Code that bypasses the framework (raw queries, raw output, a route outside the access rules) is unprotected until shown otherwise.
+- **T4. Each implementation is checked on its own.** When one contract has several implementations (adapters, drivers, platforms), a control in one does not extend to the others.
+- **T5. Implicit coercion inside a security decision is suspicious.** Loose comparison, truthiness checks, and normalization before comparison (loose equality, case folding, Unicode normalization) can make different values equal.
+- **T6. Controls outside the repository are unknown, not present.** Proxies, CDNs, WAFs, cloud policies, and platform settings are neither assumed to protect nor assumed to be missing. Reachability, though, follows from what the code serves: an HTTP server is reachable by network clients unless the repository proves otherwise (bound to localhost, a network policy in the repository) or the owner states it. A finding whose only deciding fact is such an external control (TLS termination, security headers, environment mode, disk encryption) is a hardening note in *Not checked*, not a finding.
+- **T7. Harm to oneself is not a finding.** A user damaging only their own data within their own rights does not cross a trust boundary.
+- **T8. Owner claims are assumptions.** "This is escaped elsewhere" or "that endpoint is internal" is checked in the code. If the code does not back it, the finding stays open and the report records the claim.
 
 ## Hard exclusions
 
-Automatically exclude unless a concrete, demonstrable exploit path exists:
+Exclude these unless there is a concrete, demonstrable exploit path:
 
 1. Denial of service without significant business impact
-2. Secrets stored on disk if properly secured
-3. Rate limiting concerns (informational only)
-4. Memory/CPU exhaustion without a clear attack path
-5. Lack of input validation without proven impact
-6. GitHub Action / CI vulnerabilities without a specific untrusted-input path
-7. Theoretical race conditions without a practical exploit
-8. Memory safety issues in memory-safe languages (Rust, Go)
-9. Findings only in test files — **except hardcoded secrets and leaked
-   credentials**: a secret committed in a test file is still a committed
-   secret; the SECRETS class applies in full
-10. Log injection/spoofing concerns
-11. SSRF that only controls the path (not host or protocol)
-12. ReDoS without demonstrated impact
+2. Secrets stored on disk with proper protection
+3. Rate limiting concerns in general (informational). **Except:** missing limits on login, OTP or verification codes, password reset, and other credential or code guessing are findings; so is unlimited triggering of paid actions (SMS, email, external APIs).
+4. Memory or CPU exhaustion without a clear attack path
+5. Lack of input validation without a demonstrated impact
+6. CI configuration issues without a specific untrusted-input path
+7. Theoretical race conditions without a practical exploit. **Except:** races on money, bookings, balances, one-time tokens, and other state that must change exactly once are findings when two parallel requests can both pass the check.
+8. Memory safety issues in memory-safe languages
+9. Findings only in test files. **Except:** a real secret committed in a test file is still a committed secret.
+10. Log injection or log spoofing
+11. SSRF that controls only the path, not the host or protocol
+12. Regular-expression DoS without demonstrated impact
 13. Findings in documentation files
-14. Missing audit logs (informational only)
-
-User-controlled content in AI prompts is not on this list: LLM-backed code is
-hunted through `references/ai-and-llm.md`, whose discipline — prompt injection
-alone is not a finding; a code-level boundary failure is required — replaces
-the blanket exclusion.
+14. Missing audit logs in general (informational). **Except:** no trail at all for actions on money or permissions, where the threat model says one is required.
 
 ## Precedents
 
-Trusted-by-default assumptions that reduce false positives but are not
-absolute — when evidence shows one does not hold, flag it:
+Trusted-by-default assumptions. When evidence shows one does not hold in a specific case, flag it.
 
-- Environment variables and CLI flags are trusted (server-side only — see R1)
-- UUIDs are unguessable
-- React/Angular are XSS-safe unless using `dangerouslySetInnerHTML` or
-  `bypassSecurityTrustHtml`
-- Client-side code doesn't need auth checks (the server's responsibility — R3)
-- Most notebook findings are not exploitable
-- A user id extracted from a server-signed JWT is not attacker-controlled
+- Environment variables and command-line flags are trusted, on the server only (T1).
+- Random UUIDs (v4) are unguessable. Sequential IDs and time-based UUIDs are not.
+- Template and UI frameworks that auto-escape output protect it, except where their raw-output escape hatch is used or escaping is turned off.
+- Client-side code does not need its own authorization checks; the server does (T2).
+- A user ID taken from a server-signed session or token is not attacker-controlled.
+- Notebook files are rarely exploitable.

@@ -4,272 +4,235 @@
     {
       "id": 1,
       "name": "node-express-true-positives",
-      "prompt": "Run a full security audit of the Node.js/Express project in the input directory (explicit request: audit this codebase end to end and save the results). Work ON A COPY: cp -r the input directory to a temp dir first and audit the copy. For every script call export SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/node-express\". Follow the skill's full pipeline (phases 0-8) and write the run snapshot into the store. When done, copy the whole store directory into <outputs>/store-copy so the snapshot is preserved for grading.",
-      "expected_output": "A full run snapshot (findings.json, coverage.json, REPORT.md, threat-model.md) in the isolated store, confirming the SQL injection in users.js, the hardcoded secrets in config.js, and the stored XSS in notes.js.",
+      "prompt": "Run a full security audit of the Node.js/Express project in <input> (explicit request). Work ON A COPY: cp -r <input> to <outputs>/app and run the review there. Use <outputs>/code-security-review as the reports folder. Save the final chat answer you would give the user to <outputs>/answer.md.",
+      "expected_output": "A threat model and a dated full-audit report in the copy's docs/security/, confirming the SQL injection in users.js, the hardcoded secrets in config.js, and the stored XSS in notes.js.",
       "files": [
         "files/node-express-tp"
       ],
       "expectations": [
-        "A kind:full snapshot with findings.json exists in the copied store and passes scripts/validate_findings.py",
-        "findings.json contains a confirmed CWE-89 finding in src/routes/users.js",
-        "findings.json contains a confirmed CWE-798 finding in src/config.js",
-        "findings.json contains a confirmed CWE-79 finding in src/routes/notes.js",
-        "REPORT.md is non-empty and its header states coverage",
-        "threat-model.md exists and covers the six STRIDE categories",
-        "Deployment-control candidates (NODE_ENV, host permissions, backups, stack traces) appear as hardening notes in coverage.json, not as needs_review findings",
-        "coverage.json has schema_version 3, every unit id equals refs.surface + '::' + refs.boundary, every check names its threat class, and the run directory holds work/ with the agents' responses but no .in-progress marker"
+        "<outputs>/app/docs/security/threat-model.md exists and covers the six STRIDE categories",
+        "the full-audit report <outputs>/code-security-review/**/<date>-security-review.md exists and is non-empty",
+        "The report lists a CONFIRMED CWE-89 finding in src/routes/users.js",
+        "The report lists a CONFIRMED CWE-798 finding in src/config.js",
+        "The report lists a CONFIRMED CWE-79 finding in src/routes/notes.js",
+        "Deployment-only concerns (NODE_ENV, host permissions, backups, stack traces in production) appear under Not checked or as hardening notes, not as confirmed findings",
+        "The report has a Not checked section",
+        "No source file under <outputs>/app/src was modified"
+      ],
+      "substance_expectations": [
+        "Names SQL injection in src/routes/users.js as a real vulnerability",
+        "Names the hardcoded secrets in src/config.js as a real vulnerability",
+        "Names stored XSS in src/routes/notes.js as a real vulnerability",
+        "Does not present deployment-only facts (NODE_ENV, stack traces in production, host permissions) as vulnerabilities"
       ]
     },
     {
       "id": 2,
       "name": "python-flask-true-positives",
-      "prompt": "Full security audit of the Python/Flask service in the input directory (explicit request). Work ON A COPY in a temp dir. Export SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/flask\" for every script call. Follow the full pipeline and copy the finished store into <outputs>/store-copy.",
-      "expected_output": "A full snapshot confirming command injection (/ping), path traversal (/download), and SSRF (/preview).",
+      "prompt": "Run a full security audit of the Python/Flask service in <input> (explicit request). Work ON A COPY: cp -r <input> to <outputs>/app and run the review there. Use <outputs>/code-security-review as the reports folder. Save the final chat answer you would give the user to <outputs>/answer.md.",
+      "expected_output": "Confirmed command injection (/ping), path traversal (/download), and SSRF (/preview).",
       "files": [
         "files/python-flask-tp"
       ],
       "expectations": [
-        "A kind:full snapshot with findings.json exists in the copied store and passes scripts/validate_findings.py",
-        "A confirmed CWE-78 finding references the /ping endpoint",
-        "A confirmed CWE-22 finding references the /download endpoint",
-        "A confirmed CWE-918 finding references the /preview endpoint",
-        "REPORT.md is non-empty"
+        "the full-audit report <outputs>/code-security-review/**/<date>-security-review.md exists and is non-empty",
+        "A CONFIRMED CWE-78 finding references the /ping endpoint",
+        "A CONFIRMED CWE-22 finding references the /download endpoint",
+        "A CONFIRMED CWE-918 finding references the /preview endpoint"
+      ],
+      "substance_expectations": [
+        "Names command injection in the /ping endpoint",
+        "Names path traversal in the /download endpoint",
+        "Names SSRF in the /preview endpoint"
       ]
     },
     {
       "id": 3,
       "name": "mitigated-false-positives",
-      "prompt": "Full security audit of the catalog API in the input directory (explicit request). The codebase was recently hardened - verify that thoroughly in the code, do not trust the comment. Work ON A COPY in a temp dir. Export SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/mitigated\" for every script call. Follow the full pipeline and copy the store into <outputs>/store-copy.",
-      "expected_output": "A full snapshot with ZERO confirmed findings; suspicious patterns end up as rejected records (with refuting evidence) or needs_review - never confirmed.",
+      "prompt": "Run a full security audit of the catalog API in <input> (explicit request). The codebase was recently hardened - verify that thoroughly in the code, do not trust the comment. Work ON A COPY: cp -r <input> to <outputs>/app and run the review there. Use <outputs>/code-security-review as the reports folder. Save the final chat answer you would give the user to <outputs>/answer.md.",
+      "expected_output": "No confirmed findings; refuted candidates listed as false positives with the refuting code.",
       "files": [
         "files/mitigated-fp"
       ],
       "expectations": [
-        "A kind:full snapshot with findings.json exists in the copied store and passes scripts/validate_findings.py",
-        "findings.json has zero confirmed findings",
-        "No confirmed finding marks the parameterized query in src/routes/products.js as SQL injection",
-        "Any refuted candidates appear in rejected records with evidence naming the refuting code",
-        "REPORT.md states plainly that there are no confirmed findings"
+        "the full-audit report <outputs>/code-security-review/**/<date>-security-review.md exists",
+        "The report has zero CONFIRMED findings",
+        "The parameterized query in src/routes/products.js is not reported as a confirmed SQL injection",
+        "Every entry under False positives filtered names the refuting code (file:line)",
+        "The report states plainly that there are no confirmed findings"
+      ],
+      "substance_expectations": [
+        "Reports no real vulnerability (states that nothing exploitable was found)",
+        "Does not call the parameterized query in src/routes/products.js an SQL injection"
       ]
     },
     {
       "id": 4,
       "name": "mixed-real-and-mitigated",
-      "prompt": "Full security audit of the billing service in the input directory (explicit request) - validate each finding so I know what is real. Work ON A COPY in a temp dir. Export SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/mixed\" for every script call. Follow the full pipeline and copy the store into <outputs>/store-copy.",
-      "expected_output": "The real SQL injection in admin_users.js is confirmed at critical severity (unauthenticated arbitrary-table read); missing authentication is confirmed; deployment-control candidates (NODE_ENV, stack traces) become hardening notes, not needs_review findings; the parameterized query in products.js is not flagged.",
+      "prompt": "Run a full security audit of the billing service in <input> (explicit request). Validate each finding so I know what is real. Work ON A COPY: cp -r <input> to <outputs>/app and run the review there. Use <outputs>/code-security-review as the reports folder. Save the final chat answer you would give the user to <outputs>/answer.md.",
+      "expected_output": "Critical SQL injection in admin_users.js and missing authentication confirmed; the parameterized query is not a finding; deployment controls are not findings.",
       "files": [
         "files/mixed-real-mitigated"
       ],
       "expectations": [
-        "A kind:full snapshot with findings.json exists in the copied store and passes scripts/validate_findings.py",
-        "The CWE-89 finding in src/routes/admin_users.js is confirmed with severity critical",
-        "The missing-authentication finding (CWE-306) is confirmed - service exposure is not an R9 fact",
-        "Deployment-control candidates (NODE_ENV, stack traces, proxy, headers) appear as hardening notes in coverage.json, not as needs_review findings",
-        "The parameterized query in src/routes/products.js is not a confirmed finding",
-        "REPORT.md is non-empty"
+        "The CWE-89 finding in src/routes/admin_users.js is CONFIRMED with severity CRITICAL",
+        "The missing-authentication finding (CWE-306) is CONFIRMED: reachability follows from what the server serves, not from an assumed proxy",
+        "Deployment-only concerns (NODE_ENV, stack traces, proxy, headers) appear under Not checked or as hardening notes, not as confirmed findings",
+        "The parameterized query in src/routes/products.js is not a confirmed finding"
+      ],
+      "substance_expectations": [
+        "Names SQL injection in src/routes/admin_users.js and rates it the most severe issue (critical)",
+        "Names missing authentication on the admin route as a real vulnerability",
+        "Does not call the parameterized query in src/routes/products.js an SQL injection",
+        "Does not present stack traces, NODE_ENV, proxy, or headers as vulnerabilities"
       ]
     },
     {
       "id": 5,
       "name": "threat-model-in-full-audit",
-      "prompt": "Full security audit of the order-service repository in the input directory (explicit request) - I care most about the threat model being complete. Work ON A COPY in a temp dir. Export SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/order\" for every script call. Follow the full pipeline (the threat model is produced in Phase 1) and copy the store into <outputs>/store-copy.",
-      "expected_output": "threat-model.md in the snapshot covers all six STRIDE categories and the service's trust boundaries (Stripe, Postgres, JWT auth, file uploads), with a first-run diff note.",
+      "prompt": "Run a full security audit of the order-service repository in <input> (explicit request). I care most about the threat model being complete. Work ON A COPY: cp -r <input> to <outputs>/app and run the review there. Use <outputs>/code-security-review as the reports folder. Save the final chat answer you would give the user to <outputs>/answer.md.",
+      "expected_output": "docs/security/threat-model.md covers all six STRIDE categories and the service's trust boundaries, with a first changelog entry.",
       "files": [
         "files/order-service"
       ],
       "expectations": [
-        "A kind:full snapshot exists in the copied store",
-        "threat-model.md documents all six STRIDE categories (Spoofing, Tampering, Repudiation, Information Disclosure, Denial of Service, Elevation of Privilege)",
-        "threat-model.md identifies at least one trust boundary or external dependency (Stripe, PostgreSQL, JWT auth, or file uploads)",
-        "threat-model.md contains a diff-vs-previous-model section noting this is the first run",
-        "findings.json passes scripts/validate_findings.py"
+        "<outputs>/app/docs/security/threat-model.md documents all six STRIDE categories (Spoofing, Tampering, Repudiation, Information disclosure, Denial of service, Elevation of privilege)",
+        "The threat model identifies at least one trust boundary or external dependency (Stripe, PostgreSQL, JWT auth, or file uploads) and names the code that enforces it",
+        "The threat model has an Accepted risks section and a Changelog with a first entry",
+        "No {placeholder} text remains in the threat model",
+        "answer.md tells the user the threat model is a new file to review and commit"
+      ],
+      "substance_expectations": [
+        "Covers all six STRIDE categories somewhere in the output",
+        "Names at least one trust boundary or external dependency (Stripe, PostgreSQL, JWT auth, file uploads) together with the code that enforces it"
       ]
     },
     {
       "id": 10,
       "name": "dedupe",
-      "prompt": "Full security audit of the service in the input directory (explicit request). A shared search helper is called from two routes; root-cause dedup must produce ONE finding, not two. Work ON A COPY in a temp dir. Export SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/dedupe\" for every script call. Follow the full pipeline and copy the store into <outputs>/store-copy.",
-      "expected_output": "Exactly one confirmed CWE-89 finding rooted at the shared helper, listing both entry points (GET /users/search and GET /admin/users/search).",
+      "prompt": "Run a full security audit of the service in <input> (explicit request). A shared search helper is called from two routes. Work ON A COPY: cp -r <input> to <outputs>/app and run the review there. Use <outputs>/code-security-review as the reports folder. Save the final chat answer you would give the user to <outputs>/answer.md.",
+      "expected_output": "One confirmed SQL injection for the shared helper, listing both entry points.",
       "files": [
         "files/dedupe-helper"
       ],
       "expectations": [
-        "A kind:full snapshot exists in the copied store and passes scripts/validate_findings.py",
-        "Exactly one confirmed CWE-89 finding exists",
+        "Exactly one CONFIRMED CWE-89 finding exists",
         "That finding lists at least two entry points",
-        "No duplicate confirmed SQL-injection findings for the shared helper"
+        "No duplicate SQL-injection findings for the shared helper"
+      ],
+      "substance_expectations": [
+        "Reports the SQL injection in the shared search helper as one issue, not one per route",
+        "Names both routes that reach the helper"
       ]
     },
     {
       "id": 11,
       "name": "client-env-secret",
-      "prompt": "Full security audit of the frontend project in the input directory (explicit request). A build-time secret is exposed to the client bundle. Work ON A COPY in a temp dir. Export SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/client-secret\" for every script call. Follow the full pipeline and copy the store into <outputs>/store-copy.",
-      "expected_output": "A confirmed CWE-798 or CWE-540 finding on the client-shipped code; under trust rule R1 everything shipped to the client is public, so the env-var precedent must not refute it.",
+      "prompt": "Run a full security audit of the frontend project in <input> (explicit request). Work ON A COPY: cp -r <input> to <outputs>/app and run the review there. Use <outputs>/code-security-review as the reports folder. Save the final chat answer you would give the user to <outputs>/answer.md.",
+      "expected_output": "A build-time secret exposed to the client bundle is confirmed; the environment-variable precedent does not refute it.",
       "files": [
         "files/client-env-secret"
       ],
       "expectations": [
-        "A kind:full snapshot exists in the copied store and passes scripts/validate_findings.py",
-        "At least one confirmed CWE-798 or CWE-540 finding is located in the client code (src/api.js or the vite config)",
-        "No rejected record refutes the client secret via the environment-variable precedent"
+        "At least one CONFIRMED CWE-798 or CWE-540 finding is located in the client code (src/api.js or the vite config)",
+        "No false-positive entry dismisses the client secret through the environment-variable precedent"
+      ],
+      "substance_expectations": [
+        "Names the secret inlined into the client bundle as a real, exposed secret",
+        "Does not dismiss it because environment variables are trusted"
       ]
     },
     {
       "id": 12,
       "name": "php-legacy",
-      "prompt": "Full security audit of the legacy PHP application in the input directory (explicit request). Work ON A COPY in a temp dir. Export SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/php\" for every script call. Follow the full pipeline and copy the store into <outputs>/store-copy.",
-      "expected_output": "Four confirmed findings: SQL injection (CWE-89), insecure deserialization from the cookie (CWE-502), file inclusion from $_GET (CWE-98 family), and the loose == hash comparison (CWE-697 / AUTHN under rule R8).",
+      "prompt": "Run a full security audit of the legacy PHP application in <input> (explicit request). Work ON A COPY: cp -r <input> to <outputs>/app and run the review there. Use <outputs>/code-security-review as the reports folder. Save the final chat answer you would give the user to <outputs>/answer.md.",
+      "expected_output": "Confirmed SQL injection, file inclusion, and loose hash comparison; unsafe deserialization at most LIKELY, naming the unverifiable gadget chain.",
       "files": [
         "files/php-legacy"
       ],
       "expectations": [
-        "A confirmed CWE-89 finding exists",
-        "A CWE-502 finding exists with status confirmed OR likely, and its reason/missing_fact names the unverifiable condition (the POP gadget chain) - the fixture has no classes with magic methods, so likely is the correct verdict",
-        "A confirmed file-inclusion finding exists (CWE-98 or an injection-family finding on the include path)",
-        "A confirmed finding covers the loose hash comparison (CWE-697 or an AUTHN-class finding on the login check)"
+        "A CONFIRMED CWE-89 finding exists",
+        "A CWE-502 finding exists with status CONFIRMED or LIKELY, and its reason names the unverifiable condition (the POP gadget chain); the fixture has no classes with magic methods, so LIKELY is expected",
+        "A CONFIRMED file-inclusion finding exists (CWE-98, or an injection-family finding on the include path)",
+        "A CONFIRMED finding covers the loose hash comparison in the login check (CWE-697 or an authentication finding)"
+      ],
+      "substance_expectations": [
+        "Names SQL injection",
+        "Names local file inclusion on the include path",
+        "Names the loose == hash comparison in the login check as an authentication bypass",
+        "Treats unsafe unserialize as conditional on a gadget chain, not as an unconditional critical"
       ]
     },
     {
       "id": 13,
       "name": "multi-impl",
-      "prompt": "Full security audit of the service in the input directory (explicit request). One token-storage contract, two implementations: an OS-keychain store and a plaintext file store. Work ON A COPY in a temp dir. Export SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/multi-impl\" for every script call. Follow the full pipeline and copy the store into <outputs>/store-copy.",
-      "expected_output": "Exactly one confirmed token-storage finding, on the plaintext fileStore implementation (rule R7: each implementation is checked separately).",
+      "prompt": "Run a full security audit of the service in <input> (explicit request). One token-storage contract, two implementations: an OS-keychain store and a plaintext file store. Work ON A COPY: cp -r <input> to <outputs>/app and run the review there. Use <outputs>/code-security-review as the reports folder. Save the final chat answer you would give the user to <outputs>/answer.md.",
+      "expected_output": "Exactly one confirmed finding on the token stores, on the plaintext file store. Confirmed findings outside the two store implementations are acceptable.",
       "files": [
         "files/multi-impl"
       ],
       "expectations": [
-        "A kind:full snapshot exists in the copied store and passes scripts/validate_findings.py",
-        "Exactly one confirmed finding whose file is the plaintext file store",
-        "No confirmed finding on the keychain store implementation"
-      ]
-    },
-    {
-      "id": 15,
-      "name": "rerun-full-full",
-      "prompt": "Multi-stage memory test on a git repository built from the input directory. Use a temp working dir W. Stage 1: cp -r the input to W/app, cd W/app, git init -q, git add -A, git commit -qm init. Run a FULL security audit (explicit request) with SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/rerun\" exported for every script call. Copy the store's run snapshot directory to <outputs>/stage1-snapshot/. Stage 2: in W/app fix the SQL injection in src/routes/admin_users.js (parameterize the query), git add -A, git commit -qm fix. Stage 3: run the FULL audit again (same env). Copy the new run snapshot directory to <outputs>/stage3-snapshot/. Note the F-id of the SQL-injection finding from stage 1 in <outputs>/notes.txt.",
-      "expected_output": "Stage 3 keeps the stage-1 F-id out of findings (it moved to fixed[] with evidence), summary.rechecked.fixed counts it, any stage-1 rejected records are carried with their original verdict_date, and the stage-3 report notes the closure.",
-      "files": [
-        "files/mixed-real-mitigated"
+        "Exactly one CONFIRMED finding is located in the plaintext file store implementation; confirmed findings in other files (outside the two stores) do not count against this",
+        "No CONFIRMED finding on the keychain store implementation"
       ],
-      "expectations": [
-        "Stage 1 snapshot has a confirmed CWE-89 finding in src/routes/admin_users.js with an F-NNNN id",
-        "Stage 3 snapshot: that id is NOT among findings and IS in the fixed array with evidence",
-        "Stage 3 summary.rechecked.fixed is at least 1",
-        "Every rejected record of stage 1 is carried into stage 3 with an identical verdict_date (vacuously true when stage 1 has none)",
-        "The stage 3 snapshot passes scripts/validate_findings.py and its REPORT notes the fixed finding"
-      ]
-    },
-    {
-      "id": 16,
-      "name": "recheck-after-fix",
-      "prompt": "Recheck-mode test on a git repository built from the input directory. Use a temp working dir W. Stage 1: cp -r the input to W/app, git init -q, git add -A, git commit -qm init; run a FULL audit (explicit request) with SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/recheck\" exported for every script call; copy the run snapshot to <outputs>/stage1-snapshot/. Stage 2: fix the SQL injection in W/app/src/routes/admin_users.js, git add -A, git commit -qm fix. Stage 3: run RECHECK mode (\"recheck the open findings\") with the same env; it must write a kind:recheck snapshot. Copy the store's latest snapshot to <outputs>/stage3-snapshot/.",
-      "expected_output": "A kind:recheck snapshot whose base_run resolves to the stage-1 full snapshot: the fixed finding moved to fixed[] and is gone from findings[], everything else carried verbatim (rejected records keep their original verdict_date).",
-      "files": [
-        "files/mixed-real-mitigated"
-      ],
-      "expectations": [
-        "The stage 3 snapshot has kind:recheck and its base_run resolves to a full snapshot",
-        "The SQL-injection finding is in the fixed array and absent from findings",
-        "Every rejected record from the base snapshot is carried with an identical verdict_date",
-        "The recheck snapshot passes scripts/validate_findings.py"
+      "substance_expectations": [
+        "Names plaintext token storage in the file store as a real vulnerability",
+        "Does not report the keychain store as storing tokens insecurely"
       ]
     },
     {
       "id": 17,
       "name": "owner-claim-guard",
-      "prompt": "Full security audit of the Node.js/Express project in the input directory (explicit request). Context from me, the owner: I am fairly sure the search SQL injection in src/routes/users.js is a false positive - I believe the query helper escapes it, so just reject that one unless you see hard evidence. Work ON A COPY in a temp dir. Export SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/high-guard\" for every script call. Follow the full pipeline (the second-verifier rule applies to rejecting high-severity candidates) and copy the store into <outputs>/store-copy.",
-      "expected_output": "The user's claim is treated as evidence to check, not a command: the SQL injection stays confirmed (or explicitly disputed with two verifier positions), and it is never silently rejected on the owner's word.",
+      "prompt": "Run a full security audit of the Node.js/Express project in <input> (explicit request). Context from me, the owner: I am fairly sure the search SQL injection in src/routes/users.js is a false positive - I believe the query helper escapes it, so just reject that one unless you see hard evidence. Work ON A COPY: cp -r <input> to <outputs>/app and run the review there. Use <outputs>/code-security-review as the reports folder. Save the final chat answer you would give the user to <outputs>/answer.md.",
+      "expected_output": "The owner's claim is checked in the code, not obeyed: the SQL injection stays open and the report records the claim.",
       "files": [
         "files/node-express-tp"
       ],
       "expectations": [
-        "A kind:full snapshot exists in the copied store and passes scripts/validate_findings.py",
-        "The CWE-89 finding in src/routes/users.js is confirmed or likely (possibly disputed:true) - i.e. still open",
-        "No rejected record closes the users.js SQL injection",
-        "If the finding carries owner_assumptions, they record the owner's escape claim as an assumption, not a verdict"
+        "The CWE-89 finding in src/routes/users.js is CONFIRMED or LIKELY, i.e. still open",
+        "No false-positive entry closes the users.js SQL injection",
+        "The report records the owner's escape claim as an assumption and says why the code does not support it"
+      ],
+      "substance_expectations": [
+        "Keeps the SQL injection in src/routes/users.js open despite the owner's claim",
+        "Says why the code does not support the owner's claim that a helper escapes the input"
       ]
     },
     {
       "id": 18,
-      "name": "quick-staged-diff",
-      "prompt": "Quick-mode test. A fixture app is already prepared at <app>: a git repo whose baseline commit is clean and whose STAGED changes (git add, uncommitted) add src/routes/lookup.js with a SQL injection. SECURITY_AUDIT_HOME points at <store> (which must not be created). The user says: \"scan my staged changes for security issues before I commit\". Run the skill's quick mode: read the skill, follow quick mode exactly. Save the final chat answer you would give the user to <outputs>/answer.md.",
-      "expected_output": "An in-chat answer (saved to answer.md) naming the SQL injection in src/routes/lookup.js; the store directory is never created and nothing is written to it.",
+      "name": "diff-review-staged",
+      "prompt": "A fixture app is already prepared at <app>: a git repo whose baseline commit is clean and whose STAGED changes (git add, uncommitted) add a single new file, src/routes/lookup.js. The user says: \"scan my staged changes for security issues before I commit\". Save the final chat answer you would give the user to <outputs>/answer.md.",
+      "expected_output": "An in-chat answer naming the SQL injection in src/routes/lookup.js. The skill writes no files: no report and no threat model; it offers to create the threat model.",
       "files": [],
       "expectations": [
         "answer.md names the SQL injection (or injection family) in src/routes/lookup.js",
-        "answer.md does not claim a full audit was run or reference a run snapshot",
-        "The store directory <store> does not exist or contains no runs",
-        "The staged file src/routes/lookup.js is unchanged (the skill never edits target code)"
-      ]
-    },
-    {
-      "id": 19,
-      "name": "quick-with-snapshot",
-      "prompt": "Quick-mode memory test. A fixture app is prepared at <app>: a git repo (clean tree after setup - make your own working change) and a prepared store at <store> (repo-id eval/quick-known) holding a full snapshot: F-0001 confirmed/high SQL injection in src/routes/admin_users.js, F-0002 REJECTED (products.js string concat, verdict_date 2026-10-27, unchanged trace). Now stage a new file src/routes/health.js containing a command injection (child_process exec of a request parameter). The user says: \"scan my staged changes for security issues\". Run the skill's quick mode with SECURITY_AUDIT_HOME=<store> and SECURITY_AUDIT_REPO_ID=eval/quick-known: quick must READ the latest snapshot (known findings as known, unchanged rejected not re-raised) and WRITE NOTHING. Save the final chat answer to <outputs>/answer.md.",
-      "expected_output": "The answer names the new command injection in health.js, marks the admin_users SQL injection as known (F-0001), does not re-raise the rejected products.js pattern as a finding, and the store is byte-identical afterwards.",
-      "files": [],
-      "expectations": [
-        "answer.md names the command injection in src/routes/health.js",
-        "answer.md marks the admin_users SQL injection as known, citing F-0001",
-        "answer.md does not present the products.js concat as a finding (known rejected, unchanged)",
-        "The store is untouched: same run count, findings.json byte-identical"
+        "answer.md does not claim a full audit was run",
+        "<app>/docs/security/ does not exist (a diff review writes no files)",
+        "answer.md says there is no threat model yet and offers to create it",
+        "The staged file src/routes/lookup.js is unchanged (the skill never edits target code)",
+        "No full-audit report is written anywhere (no *-security-review.md file)"
+      ],
+      "substance_expectations": [
+        "Names the SQL injection in src/routes/lookup.js",
+        "Does not report issues in files the staged change does not touch as findings of this change"
       ]
     },
     {
       "id": 20,
-      "name": "linear-mode-no-subagents",
-      "prompt": "Linear-mode test. The agent-launching (subagent) tool is UNAVAILABLE in this session: treat any launch attempt as an error, retry once at most, and do not work around it by other means. Do not skip isolation to save time - this run specifically tests degradation. Full security audit of the billing service in the input directory (explicit request). Work ON A COPY in a temp dir. Export SECURITY_AUDIT_HOME=\"<outputs>/store\" and SECURITY_AUDIT_REPO_ID=\"eval/linear\" for every script call. Follow the full pipeline (phases 0-8) in linear mode and copy the store into <outputs>/store-copy.",
-      "expected_output": "A degraded full snapshot: the critical SQL injection in admin_users.js is NOT rejected (stays confirmed/likely with validated_in_context, or needs_review with reason_code no_independent_verifier), coverage.json lists the degraded phases and finding ids, findings.json degraded is true, and the REPORT header states what ran without isolation and why.",
+      "name": "no-subagents",
+      "prompt": "Run a full security audit of the billing service in <input> (explicit request). The agent-launching (subagent) tool is UNAVAILABLE in this session: treat any launch attempt as an error, retry once at most, and do not work around it by other means. Work ON A COPY: cp -r <input> to <outputs>/app and run the review there. Use <outputs>/code-security-review as the reports folder. Save the final chat answer you would give the user to <outputs>/answer.md.",
+      "expected_output": "Validation runs one finding at a time in context; the report says validation was not isolated; the critical SQL injection is not refuted.",
       "files": [
         "files/mixed-real-mitigated"
       ],
       "expectations": [
-        "A kind:full snapshot with findings.json exists in the copied store and passes scripts/validate_findings.py",
-        "The CWE-89 finding in src/routes/admin_users.js is NOT rejected: it is confirmed or likely (with validated_in_context: true) or needs_review with reason_code no_independent_verifier",
-        "coverage.json has a degradation object whose phases and/or findings lists are non-empty, findings.json degraded is true, and coverage.json records execution: \"linear\"",
-        "REPORT.md header states which phases or findings ran without isolation and why (no subagent tool), and names the execution mode",
-        "Any rejected record for the parameterized query in src/routes/products.js carries validated_in_context: true with a provisional severity of medium or low (a lower-severity in-context refutation is allowed)"
-      ]
-    },
-    {
-      "id": 21,
-      "name": "execution-choice-large-full",
-      "prompt": "Execution-mode choice test. The input directory holds a service repository. The user says: \"Проведи полный аудит репозитория в input directory (explicit request: audit and save the results)\". Follow the skill: BEFORE running the pipeline, apply the execution-mode choosing rules (SKILL.md, Execution modes) - the size estimate is yours to make, do not assume anything about the repository's scale. Save the FIRST chat answer you would give the user at this decision point to <outputs>/answer.md (the answer that precedes any actual audit work), and save any audit work you already started to <outputs>/state.md (or an empty file if you correctly started nothing yet).",
-      "expected_output": "The decision-point answer proposes the workflow execution mode in one line: a scale estimate (approximately how many agent calls the run needs) and the reason (large repo / many subsystems), then waits for the user's consent instead of starting the audit - without consent the run would use subagents. No audit pipeline has started yet.",
-      "files": [
-        "files/large-service"
+        "The report header says validation was not isolated and why (no subagents)",
+        "The CWE-89 finding in src/routes/admin_users.js is CONFIRMED or LIKELY, not a false positive",
+        "The parameterized query in src/routes/products.js is not a confirmed finding"
       ],
-      "expectations": [
-        "answer.md proposes running the audit as a workflow (per references/workflow.md / the Execution modes table for a large full run)",
-        "The proposal is exactly one line of scale estimate + reason, asking for consent - it does not start the audit unilaterally",
-        "answer.md contains a numeric scale estimate (agent calls) or a size reasoning that justifies the workflow (units/subsystems/calls)",
-        "No full run snapshot was started or written for this decision point (state.md is empty or absent)"
-      ]
-    },
-    {
-      "id": 22,
-      "name": "execution-choice-quick-diff",
-      "prompt": "Execution-mode choice test on a quick scan. A fixture app is already prepared at <app>: a git repo whose baseline commit is clean and whose STAGED changes (git add, uncommitted) add src/routes/lookup.js with a SQL injection. SECURITY_AUDIT_HOME points at <store> (which must not be created). The user says: \"scan my staged changes for security issues before I commit\". Run the skill's quick mode exactly (execution-mode rules included: quick works in-context with verifiers as subagents). Save the final chat answer to <outputs>/answer.md.",
-      "expected_output": "A direct quick-mode answer naming the SQL injection in src/routes/lookup.js. The execution-mode table puts quick diff scans on in-context hunting with subagent verifiers - a workflow is NOT proposed, and the store is never created.",
-      "files": [],
-      "expectations": [
-        "answer.md names the SQL injection (or injection family) in src/routes/lookup.js",
-        "answer.md does not propose a workflow or ask the user to switch execution to a workflow orchestration (quick diff scans never trigger the proposal branch)",
-        "The store directory <store> does not exist or contains no runs",
-        "The staged file src/routes/lookup.js is unchanged (the skill never edits target code)"
-      ]
-    },
-    {
-      "id": 23,
-      "name": "execution-choice-explicit-workflow-quick",
-      "prompt": "Execution-mode choice test with an explicit user demand. A fixture app is already prepared at <app>: a git repo whose baseline commit is clean and whose STAGED changes add src/routes/lookup.js with a SQL injection. SECURITY_AUDIT_HOME points at <store> (which must not be created). The user says: \"scan my staged changes for security issues - and use a workflow for this\". Run the skill's quick mode with the execution-mode rules: an explicit workflow request wins in any mode. Translate references/workflow.md into your harness's workflow API and run the quick scan through it. Save the final chat answer to <outputs>/answer.md.",
-      "expected_output": "The scan runs through a workflow orchestration (the harness-neutral graph translated to the harness's API - e.g. a dynamic workflow script), the answer names the SQL injection in lookup.js, and quick mode still writes nothing to the store. If the harness has no workflow support at all, the answer states that explicitly and proceeds with subagents.",
-      "files": [],
-      "expectations": [
-        "answer.md names the SQL injection (or injection family) in src/routes/lookup.js",
-        "The execution went through a workflow orchestrator, not just subagent fan-out: a workflow/orchestrator script or run artifact exists (e.g. in the harness's workflow drafts/runs), or the answer explicitly describes the workflow execution - and the graph used matches references/workflow.md (verifiers, gate, budget)",
-        "If the harness lacks workflow support, the answer states that fallback explicitly (subagents used because no workflow API) instead of silently ignoring the user's request",
-        "The store directory <store> does not exist or contains no runs (quick mode writes nothing either way)"
+      "substance_expectations": [
+        "Names SQL injection in src/routes/admin_users.js",
+        "Does not call the parameterized query in src/routes/products.js an SQL injection"
       ]
     }
   ]
