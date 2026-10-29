@@ -4,14 +4,14 @@
     {
       "id": 1,
       "name": "node-express-true-positives",
-      "prompt": "Run a full security audit of the Node.js/Express project in <input> (explicit request). Work ON A COPY: cp -r <input> to <outputs>/app and run the review there. Save the final chat answer you would give the user to <outputs>/answer.md.",
+      "prompt": "Run a full security audit of the Node.js/Express project in <input> (explicit request). Work ON A COPY: cp -r <input> to <outputs>/app and run the review there. Use <outputs>/security-reviews as the reports folder. Save the final chat answer you would give the user to <outputs>/answer.md.",
       "expected_output": "A threat model and a dated full-audit report in the copy's docs/security/, confirming the SQL injection in users.js, the hardcoded secrets in config.js, and the stored XSS in notes.js.",
       "files": [
         "files/node-express-tp"
       ],
       "expectations": [
         "<outputs>/app/docs/security/threat-model.md exists and covers the six STRIDE categories",
-        "the full-audit report <outputs>/app/docs/security/<date>-security-review.md exists and is non-empty",
+        "the full-audit report <outputs>/security-reviews/**/<date>-security-review.md exists and is non-empty",
         "The report lists a CONFIRMED CWE-89 finding in src/routes/users.js",
         "The report lists a CONFIRMED CWE-798 finding in src/config.js",
         "The report lists a CONFIRMED CWE-79 finding in src/routes/notes.js",
@@ -29,13 +29,13 @@
     {
       "id": 2,
       "name": "python-flask-true-positives",
-      "prompt": "Run a full security audit of the Python/Flask service in <input> (explicit request). Work ON A COPY: cp -r <input> to <outputs>/app and run the review there. Save the final chat answer you would give the user to <outputs>/answer.md.",
+      "prompt": "Run a full security audit of the Python/Flask service in <input> (explicit request). Work ON A COPY: cp -r <input> to <outputs>/app and run the review there. Use <outputs>/security-reviews as the reports folder. Save the final chat answer you would give the user to <outputs>/answer.md.",
       "expected_output": "Confirmed command injection (/ping), path traversal (/download), and SSRF (/preview).",
       "files": [
         "files/python-flask-tp"
       ],
       "expectations": [
-        "the full-audit report <outputs>/app/docs/security/<date>-security-review.md exists and is non-empty",
+        "the full-audit report <outputs>/security-reviews/**/<date>-security-review.md exists and is non-empty",
         "A CONFIRMED CWE-78 finding references the /ping endpoint",
         "A CONFIRMED CWE-22 finding references the /download endpoint",
         "A CONFIRMED CWE-918 finding references the /preview endpoint"
@@ -49,13 +49,13 @@
     {
       "id": 3,
       "name": "mitigated-false-positives",
-      "prompt": "Run a full security audit of the catalog API in <input> (explicit request). The codebase was recently hardened - verify that thoroughly in the code, do not trust the comment. Work ON A COPY: cp -r <input> to <outputs>/app and run the review there. Save the final chat answer you would give the user to <outputs>/answer.md.",
+      "prompt": "Run a full security audit of the catalog API in <input> (explicit request). The codebase was recently hardened - verify that thoroughly in the code, do not trust the comment. Work ON A COPY: cp -r <input> to <outputs>/app and run the review there. Use <outputs>/security-reviews as the reports folder. Save the final chat answer you would give the user to <outputs>/answer.md.",
       "expected_output": "No confirmed findings; refuted candidates listed as false positives with the refuting code.",
       "files": [
         "files/mitigated-fp"
       ],
       "expectations": [
-        "the full-audit report <outputs>/app/docs/security/<date>-security-review.md exists",
+        "the full-audit report <outputs>/security-reviews/**/<date>-security-review.md exists",
         "The report has zero CONFIRMED findings",
         "The parameterized query in src/routes/products.js is not reported as a confirmed SQL injection",
         "Every entry under False positives filtered names the refuting code (file:line)",
@@ -69,7 +69,7 @@
     {
       "id": 4,
       "name": "mixed-real-and-mitigated",
-      "prompt": "Run a full security audit of the billing service in <input> (explicit request). Validate each finding so I know what is real. Work ON A COPY: cp -r <input> to <outputs>/app and run the review there. Save the final chat answer you would give the user to <outputs>/answer.md.",
+      "prompt": "Run a full security audit of the billing service in <input> (explicit request). Validate each finding so I know what is real. Work ON A COPY: cp -r <input> to <outputs>/app and run the review there. Use <outputs>/security-reviews as the reports folder. Save the final chat answer you would give the user to <outputs>/answer.md.",
       "expected_output": "Critical SQL injection in admin_users.js and missing authentication confirmed; the parameterized query is not a finding; deployment controls are not findings.",
       "files": [
         "files/mixed-real-mitigated"
@@ -90,7 +90,7 @@
     {
       "id": 5,
       "name": "threat-model-in-full-audit",
-      "prompt": "Run a full security audit of the order-service repository in <input> (explicit request). I care most about the threat model being complete. Work ON A COPY: cp -r <input> to <outputs>/app and run the review there. Save the final chat answer you would give the user to <outputs>/answer.md.",
+      "prompt": "Run a full security audit of the order-service repository in <input> (explicit request). I care most about the threat model being complete. Work ON A COPY: cp -r <input> to <outputs>/app and run the review there. Use <outputs>/security-reviews as the reports folder. Save the final chat answer you would give the user to <outputs>/answer.md.",
       "expected_output": "docs/security/threat-model.md covers all six STRIDE categories and the service's trust boundaries, with a first changelog entry.",
       "files": [
         "files/order-service"
@@ -110,7 +110,7 @@
     {
       "id": 10,
       "name": "dedupe",
-      "prompt": "Run a full security audit of the service in <input> (explicit request). A shared search helper is called from two routes. Work ON A COPY: cp -r <input> to <outputs>/app and run the review there. Save the final chat answer you would give the user to <outputs>/answer.md.",
+      "prompt": "Run a full security audit of the service in <input> (explicit request). A shared search helper is called from two routes. Work ON A COPY: cp -r <input> to <outputs>/app and run the review there. Use <outputs>/security-reviews as the reports folder. Save the final chat answer you would give the user to <outputs>/answer.md.",
       "expected_output": "One confirmed SQL injection for the shared helper, listing both entry points.",
       "files": [
         "files/dedupe-helper"
@@ -128,7 +128,7 @@
     {
       "id": 11,
       "name": "client-env-secret",
-      "prompt": "Run a full security audit of the frontend project in <input> (explicit request). Work ON A COPY: cp -r <input> to <outputs>/app and run the review there. Save the final chat answer you would give the user to <outputs>/answer.md.",
+      "prompt": "Run a full security audit of the frontend project in <input> (explicit request). Work ON A COPY: cp -r <input> to <outputs>/app and run the review there. Use <outputs>/security-reviews as the reports folder. Save the final chat answer you would give the user to <outputs>/answer.md.",
       "expected_output": "A build-time secret exposed to the client bundle is confirmed; the environment-variable precedent does not refute it.",
       "files": [
         "files/client-env-secret"
@@ -145,7 +145,7 @@
     {
       "id": 12,
       "name": "php-legacy",
-      "prompt": "Run a full security audit of the legacy PHP application in <input> (explicit request). Work ON A COPY: cp -r <input> to <outputs>/app and run the review there. Save the final chat answer you would give the user to <outputs>/answer.md.",
+      "prompt": "Run a full security audit of the legacy PHP application in <input> (explicit request). Work ON A COPY: cp -r <input> to <outputs>/app and run the review there. Use <outputs>/security-reviews as the reports folder. Save the final chat answer you would give the user to <outputs>/answer.md.",
       "expected_output": "Confirmed SQL injection, file inclusion, and loose hash comparison; unsafe deserialization at most LIKELY, naming the unverifiable gadget chain.",
       "files": [
         "files/php-legacy"
@@ -166,7 +166,7 @@
     {
       "id": 13,
       "name": "multi-impl",
-      "prompt": "Run a full security audit of the service in <input> (explicit request). One token-storage contract, two implementations: an OS-keychain store and a plaintext file store. Work ON A COPY: cp -r <input> to <outputs>/app and run the review there. Save the final chat answer you would give the user to <outputs>/answer.md.",
+      "prompt": "Run a full security audit of the service in <input> (explicit request). One token-storage contract, two implementations: an OS-keychain store and a plaintext file store. Work ON A COPY: cp -r <input> to <outputs>/app and run the review there. Use <outputs>/security-reviews as the reports folder. Save the final chat answer you would give the user to <outputs>/answer.md.",
       "expected_output": "Exactly one confirmed finding on the token stores, on the plaintext file store. Confirmed findings outside the two store implementations are acceptable.",
       "files": [
         "files/multi-impl"
@@ -183,7 +183,7 @@
     {
       "id": 17,
       "name": "owner-claim-guard",
-      "prompt": "Run a full security audit of the Node.js/Express project in <input> (explicit request). Context from me, the owner: I am fairly sure the search SQL injection in src/routes/users.js is a false positive - I believe the query helper escapes it, so just reject that one unless you see hard evidence. Work ON A COPY: cp -r <input> to <outputs>/app and run the review there. Save the final chat answer you would give the user to <outputs>/answer.md.",
+      "prompt": "Run a full security audit of the Node.js/Express project in <input> (explicit request). Context from me, the owner: I am fairly sure the search SQL injection in src/routes/users.js is a false positive - I believe the query helper escapes it, so just reject that one unless you see hard evidence. Work ON A COPY: cp -r <input> to <outputs>/app and run the review there. Use <outputs>/security-reviews as the reports folder. Save the final chat answer you would give the user to <outputs>/answer.md.",
       "expected_output": "The owner's claim is checked in the code, not obeyed: the SQL injection stays open and the report records the claim.",
       "files": [
         "files/node-express-tp"
@@ -209,7 +209,8 @@
         "answer.md does not claim a full audit was run",
         "<app>/docs/security/ does not exist (a diff review writes no files)",
         "answer.md says there is no threat model yet and offers to create it",
-        "The staged file src/routes/lookup.js is unchanged (the skill never edits target code)"
+        "The staged file src/routes/lookup.js is unchanged (the skill never edits target code)",
+        "No full-audit report is written anywhere (no *-security-review.md file)"
       ],
       "substance_expectations": [
         "Names the SQL injection in src/routes/lookup.js",
@@ -219,7 +220,7 @@
     {
       "id": 20,
       "name": "no-subagents",
-      "prompt": "Run a full security audit of the billing service in <input> (explicit request). The agent-launching (subagent) tool is UNAVAILABLE in this session: treat any launch attempt as an error, retry once at most, and do not work around it by other means. Work ON A COPY: cp -r <input> to <outputs>/app and run the review there. Save the final chat answer you would give the user to <outputs>/answer.md.",
+      "prompt": "Run a full security audit of the billing service in <input> (explicit request). The agent-launching (subagent) tool is UNAVAILABLE in this session: treat any launch attempt as an error, retry once at most, and do not work around it by other means. Work ON A COPY: cp -r <input> to <outputs>/app and run the review there. Use <outputs>/security-reviews as the reports folder. Save the final chat answer you would give the user to <outputs>/answer.md.",
       "expected_output": "Validation runs one finding at a time in context; the report says validation was not isolated; the critical SQL injection is not refuted.",
       "files": [
         "files/mixed-real-mitigated"

@@ -1,6 +1,6 @@
 ---
 name: code-security-review
-version: 4.3.0
+version: 4.4.0
 description: |
   Review code for security vulnerabilities by reading the source: keep a STRIDE
   threat model of the repository in docs/security/, check the requested code
@@ -31,7 +31,7 @@ Review code for security vulnerabilities by reasoning over the source. The revie
 Phase 1  Threat model   docs/security/threat-model.md exists? reuse it : create it (diff review: offer it)
 Phase 2  Scan           requested code × six STRIDE categories → candidate findings
 Phase 3  Validate       one independent refuter per candidate → status per finding
-Report                  diff review → in chat; full audit → docs/security/<date>-security-review.md
+Report                  diff review → in chat; full audit → ~/security-reviews/<owner>/<repo>/<date>-security-review.md
 ```
 
 The threat model is the persistent part. It lives in the repository, is reviewed and committed like any other document, and every later review reasons against it. Findings are recomputed on every run from the current code.
@@ -49,9 +49,11 @@ The threat model is the persistent part. It lives in the repository, is reviewed
 | File | Written by | Commit it? |
 |---|---|---|
 | `docs/security/threat-model.md` | Phase 1, updated over time | Yes. It is the shared model of the system. Accepted risks and dismissed findings live in it too. |
-| `docs/security/<YYYY-MM-DD>-security-review.md` | Full audit report | The owner decides. |
+| `~/security-reviews/<owner>/<repo>/<YYYY-MM-DD>-security-review.md` | Full audit report | No: it lives outside the repository. It describes open vulnerabilities, and a file in git history cannot be taken back. Share findings with the team through a private tracker. |
 
-A diff review writes nothing: the answer goes to the conversation. If the repository's agent instructions name a different location for security documents, use that instead of `docs/security/`.
+The threat model is in the repository because it describes the system. Reports are outside it, in one folder per repository in the user's home directory, so they survive a fresh clone and are shared by every worktree of the repository. `<owner>/<repo>` comes from the `origin` remote (`git remote get-url origin`); without a remote, use the repository's directory name for both. If the user or the repository's agent instructions name a different reports folder, use that.
+
+A diff review writes nothing: the answer goes to the conversation. If the repository's agent instructions name a different location for the threat model, use that instead of `docs/security/`.
 
 ## Modes
 
@@ -60,7 +62,7 @@ Pick the mode from the request. If the scope is unclear, ask.
 | Mode | Scope | Output |
 |---|---|---|
 | **Diff review** (default) | PR (`gh pr diff`), staged (`git diff --cached`), uncommitted (`git diff`), a commit or range, a branch comparison, the last N commits | Answer in chat |
-| **Full audit** | The whole repository, or a named directory/module | Report file in `docs/security/` |
+| **Full audit** | The whole repository, or a named directory/module | Report file in the reports folder |
 | **Threat model only** | Create or refresh `docs/security/threat-model.md` | The threat model file |
 
 ## Phase 1: Threat model
@@ -103,7 +105,9 @@ At this stage, err on the side of including a candidate. Phase 3 filters.
 
 ## Report
 
-Write the report in the format given at the end of `references/vulnerability-validation.md`. In a diff review, answer in the conversation. In a full audit, write `docs/security/<YYYY-MM-DD>-security-review.md` (date from `date +%F`) and give a short summary in the conversation.
+Write the report in the format given at the end of `references/vulnerability-validation.md`. In a diff review, answer in the conversation. In a full audit, write `~/security-reviews/<owner>/<repo>/<YYYY-MM-DD>-security-review.md` (date from `date +%F`; if that file exists, add `-2`, `-3`) and give a short summary in the conversation, with the report's path.
+
+In a full audit, if the reports folder holds an earlier report, read the most recent one before the report is written and add a section on the status of its findings: fixed, partly fixed, still open, or refuted, each with the code that shows it.
 
 Severity guides the reader:
 
